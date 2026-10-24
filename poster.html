@@ -49,8 +49,8 @@
                               linear-gradient(-45deg, #444 25%, transparent 25%), 
                               linear-gradient(45deg, transparent 75%, #444 75%), 
                               linear-gradient(-45deg, transparent 75%, #444 75%);
-            background-size: 16px 16px;
-            background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+            background-size: 32px 32px;
+            background-position: 0 0, 0 16px, 16px -16px, -16px 0px;
             background-color: #222;
         }
 
@@ -130,7 +130,8 @@
         <!-- FAVICON TOOL -->
         <div class="tool-box">
             <h2>favicon designer (64x64 transparent)</h2>
-            <canvas id="favicon-canvas" class="chess-canvas" width="512" height="512" style="width: 512px; height: 512px;"></canvas>
+            <!-- Main playground canvas is native 64x64, scaled up cleanly via CSS to 512x512 -->
+            <canvas id="favicon-canvas" class="chess-canvas" width="64" height="64" style="width: 512px; height: 512px; image-rendering: pixelated;"></canvas>
             <div style="font-size: 11px; color: #808080; text-transform: lowercase;">
                 tip: click & drag to move. hover & use arrows (w/h) or scroll (scale).
             </div>
@@ -142,27 +143,27 @@
             <h2>live previews</h2>
             <div class="previews-grid">
                 <div class="preview-item">
-                    <canvas id="prev-16" width="16" height="16" class="chess-canvas" style="width: 32px; height: 32px;"></canvas>
+                    <canvas id="prev-16" width="16" height="16" class="chess-canvas" style="width: 32px; height: 32px; image-rendering: pixelated;"></canvas>
                     <span>16px</span>
                     <button class="action-btn" style="padding: 2px 6px; font-size: 10px;" onclick="downloadSpecificSize(16)">save</button>
                 </div>
                 <div class="preview-item">
-                    <canvas id="prev-32" width="32" height="32" class="chess-canvas" style="width: 48px; height: 48px;"></canvas>
+                    <canvas id="prev-32" width="32" height="32" class="chess-canvas" style="width: 48px; height: 48px; image-rendering: pixelated;"></canvas>
                     <span>32px</span>
                     <button class="action-btn" style="padding: 2px 6px; font-size: 10px;" onclick="downloadSpecificSize(32)">save</button>
                 </div>
                 <div class="preview-item">
-                    <canvas id="prev-64" width="64" height="64" class="chess-canvas" style="width: 64px; height: 64px;"></canvas>
+                    <canvas id="prev-64" width="64" height="64" class="chess-canvas" style="width: 64px; height: 64px; image-rendering: pixelated;"></canvas>
                     <span>64px</span>
                     <button class="action-btn" style="padding: 2px 6px; font-size: 10px;" onclick="downloadSpecificSize(64)">save</button>
                 </div>
                 <div class="preview-item">
-                    <canvas id="prev-128" width="128" height="128" class="chess-canvas" style="width: 96px; height: 96px;"></canvas>
+                    <canvas id="prev-128" width="128" height="128" class="chess-canvas" style="width: 96px; height: 96px; image-rendering: pixelated;"></canvas>
                     <span>128px</span>
                     <button class="action-btn" style="padding: 2px 6px; font-size: 10px;" onclick="downloadSpecificSize(128)">save</button>
                 </div>
                 <div class="preview-item">
-                    <canvas id="prev-256" width="256" height="256" class="chess-canvas" style="width: 128px; height: 128px;"></canvas>
+                    <canvas id="prev-256" width="256" height="256" class="chess-canvas" style="width: 128px; height: 128px; image-rendering: pixelated;"></canvas>
                     <span>256px</span>
                     <button class="action-btn" style="padding: 2px 6px; font-size: 10px;" onclick="downloadSpecificSize(256)">save</button>
                 </div>
@@ -375,9 +376,10 @@
 
         const initFaviconRectangles = () => {
             faviconRectangles = [
-                { x: 10, y: 50, w: 44, h: 8, color: '#000000' },
+                { x: 8, y: 50, w: 48, h: 8, color: '#000000' }, // Bottom mountain line
                 { x: 16, y: 15, w: 14, h: 22, color: '#e62d75' },
-                { x: 38, y: 22, w: 16, h: 12, color: '#ff6600' }
+                { x: 38, y: 22, w: 16, h: 12, color: '#ff0000' },
+                { x: 38, y: 22, w: 16, h: 12, color: '#ffffff' },
             ];
         };
 
@@ -385,17 +387,18 @@
             const canvas = document.getElementById('favicon-canvas');
             const ctx = canvas.getContext('2d');
             
+            ctx.imageSmoothingEnabled = false;
             ctx.clearRect(0, 0, FAVICON_SIZE, FAVICON_SIZE);
 
             for (let i = 0; i < faviconRectangles.length; i++) {
                 const rect = faviconRectangles[i];
                 ctx.fillStyle = rect.color;
-                ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+                ctx.fillRect(Math.round(rect.x), Math.round(rect.y), Math.round(rect.w), Math.round(rect.h));
 
                 if (i === selectedRectIndex) {
                     ctx.strokeStyle = '#00ffff';
                     ctx.lineWidth = 1;
-                    ctx.strokeRect(rect.x - 0.5, rect.y - 0.5, rect.w + 1, rect.h + 1);
+                    ctx.strokeRect(Math.round(rect.x) - 0.5, Math.round(rect.y) - 0.5, Math.round(rect.w) + 1, Math.round(rect.h) + 1);
                 }
             }
 
@@ -410,8 +413,8 @@
                 const prevCanvas = document.getElementById('prev-' + sz);
                 if (!prevCanvas) return;
                 const prevCtx = prevCanvas.getContext('2d');
+                prevCtx.imageSmoothingEnabled = false;
                 prevCtx.clearRect(0, 0, sz, sz);
-                prevCtx.imageSmoothingEnabled = false; // Keeps pixel art / retro shapes crisp
                 prevCtx.drawImage(sourceCanvas, 0, 0, FAVICON_SIZE, FAVICON_SIZE, 0, 0, sz, sz);
             });
         };
@@ -438,10 +441,11 @@
 
         const getMousePos = (canvas, evt) => {
             const rect = canvas.getBoundingClientRect();
-            const scale = FAVICON_SIZE / canvas.clientWidth;
+            const scaleX = FAVICON_SIZE / rect.width;
+            const scaleY = FAVICON_SIZE / rect.height;
             return {
-                x: (evt.clientX - rect.left) * scale,
-                y: (evt.clientY - rect.top) * scale
+                x: (evt.clientX - rect.left) * scaleX,
+                y: (evt.clientY - rect.top) * scaleY
             };
         };
 
