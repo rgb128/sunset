@@ -10,6 +10,9 @@ const CTX_TYPE = '2d';
 const NUM_CHANNELS = 4;
 const MATH_HALF = 0.5;
 const BASE_TEN = 10;
+const CANVAS_BASE_WIDTH = 2000;
+const CANVAS_BASE_HEIGHT = 1000;
+const CSS_FADE_CLASS = 'fade';
 
 // Algorithm Configuration
 const RECTANGLE_COUNT = 4000;
@@ -60,9 +63,8 @@ const SILHOUETTE_HEIGHT_RATIO = 0.15;
 const SILHOUETTE_OCTAVES = 4;
 const MOUNTAIN_STEP = 2;
 
-// Resize & Regeneration Timing Constants
+// Resize Timing Constants
 const RESIZE_DEBOUNCE_DELAY_MS = 300;
-const REGENERATE_SHOW_DELAY_MS = 2000;
 
 // Global runtime variables for animation control
 let currentAnimationId = null;
@@ -300,80 +302,34 @@ const updateAndDrawParticles = (ctx, width, height, pixels, particles) => {
 };
 
 // ==========================================
-// OVERLAY & RESIZE HANDLING
+// RESIZE & SILENT REGENERATION HANDLING
 // ==========================================
-
-const ensureOverlayElement = () => {
-    let overlay = document.getElementById('regeneration-overlay');
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'regeneration-overlay';
-        overlay.style.position = 'fixed';
-        overlay.style.top = '0px';
-        overlay.style.left = '0px';
-        overlay.style.width = '100vw';
-        overlay.style.height = '100vh';
-        overlay.style.backgroundColor = '#000000';
-        overlay.style.color = '#808080';
-        overlay.style.display = 'flex';
-        overlay.style.justifyContent = 'center';
-        overlay.style.alignItems = 'center';
-        overlay.style.fontSize = '24px';
-        overlay.style.fontWeight = 'bold';
-        overlay.style.fontFamily = 'sans-serif';
-        overlay.style.zIndex = '999999';
-        overlay.style.opacity = '0';
-        overlay.style.transition = 'opacity 0.5s ease-in-out';
-        overlay.style.pointerEvents = 'none';
-        overlay.textContent = 'regenerating...';
-        document.body.appendChild(overlay);
-    }
-    return overlay;
-};
-
-const setOverlayVisible = (visible) => {
-    const overlay = ensureOverlayElement();
-    if (visible) {
-        overlay.style.pointerEvents = 'auto';
-        overlay.style.opacity = '1';
-    } else {
-        overlay.style.opacity = '0';
-        setTimeout(() => {
-            overlay.style.pointerEvents = 'none';
-        }, 500);
-    }
-};
 
 const generateAnimatedSunset = () => {
     const canvas = document.getElementById(CANVAS_ID);
     const ctx = canvas.getContext(CTX_TYPE);
     
-    // Fixed high-res base dimensions so stretching always looks clean and sharp
-    const baseWidth = 2000;
-    const baseHeight = 1000;
+    const width = CANVAS_BASE_WIDTH;
+    const height = CANVAS_BASE_HEIGHT;
     
-    canvas.width = baseWidth;
-    canvas.height = baseHeight;
+    canvas.width = width;
+    canvas.height = height;
 
-    const sunsetData = createOffscreenSunset(baseWidth, baseHeight);
+    const sunsetData = createOffscreenSunset(width, height);
     const pixels = sunsetData.data;
 
-    const targetArea = (baseWidth * baseHeight) * AREA_FRACTION;
-    const particles = initCubistParticles(baseWidth, baseHeight, targetArea);
+    const targetArea = (width * height) * AREA_FRACTION;
+    const particles = initCubistParticles(width, height, targetArea);
 
     if (currentAnimationId) {
         cancelAnimationFrame(currentAnimationId);
     }
 
     const animate = () => {
-        updateAndDropParticlesSafe(ctx, baseWidth, baseHeight, pixels, particles);
-        currentAnimationId = requestAnimationFrame(animate);
-    };
-
-    const updateAndDropParticlesSafe = (c, w, h, pix, parts) => {
         if (!isRegenerating) {
-            updateAndDrawParticles(c, w, h, pix, parts);
+            updateAndDrawParticles(ctx, width, height, pixels, particles);
         }
+        currentAnimationId = requestAnimationFrame(animate);
     };
 
     currentAnimationId = requestAnimationFrame(animate);
@@ -390,13 +346,11 @@ const setupResizeHandler = () => {
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
             isRegenerating = true;
-            setOverlayVisible(true);
 
-            setTimeout(() => {
-                generateAnimatedSunset();
-                isRegenerating = false;
-                setOverlayVisible(false);
-            }, REGENERATE_SHOW_DELAY_MS);
+            // Instantly rebuild canvas silently behind the scenes without fading
+            generateAnimatedSunset();
+
+            isRegenerating = false;
 
         }, RESIZE_DEBOUNCE_DELAY_MS);
     });
@@ -407,7 +361,18 @@ const setupResizeHandler = () => {
 // ==========================================
 
 window.onload = () => {
+    const canvas = document.getElementById(CANVAS_ID);
+    
+    // Build canvas immediately while hidden via its default HTML class (is-faded)
     generateAnimatedSunset();
+    
+    // Smoothly fade in on initial load only
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            canvas.classList.remove(CSS_FADE_CLASS);
+        });
+    });
+
     setupResizeHandler();
 };
 
@@ -428,8 +393,8 @@ const toggleDebugOriginalSunset = (enable) => {
 
     if (enable) {
         if (!debugCanvas) {
-            const width = window.innerWidth;
-            const height = window.innerHeight;
+            const width = CANVAS_BASE_WIDTH;
+            const height = CANVAS_BASE_HEIGHT;
             
             const sunsetImageData = createOffscreenSunset(width, height);
             
@@ -445,6 +410,7 @@ const toggleDebugOriginalSunset = (enable) => {
             debugCanvas.style.height = '100vh';
             debugCanvas.style.zIndex = '99999';
             debugCanvas.style.display = 'block';
+            debugCanvas.style.objectFit = 'fill';
             
             const debugCtx = debugCanvas.getContext('2d');
             debugCtx.putImageData(sunsetImageData, 0, 0);
