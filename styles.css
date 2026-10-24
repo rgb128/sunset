@@ -17,7 +17,6 @@ html, body {
     min-height: 100vh;
 }
 
-/* Viewport container that acts like background-size: cover for a 2000x2000 canvas */
 .canvas-viewport {
     position: relative;
     width: 100vw;
@@ -25,13 +24,14 @@ html, body {
     max-height: 100vh;
     overflow: hidden;
     background-color: #000000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
 #main-canvas {
     display: block;
-    width: 100% !important;
-    height: 100% !important;
-    object-fit: fill;
+    position: absolute;
     opacity: 1;
     transition: opacity 0.8s ease-in-out;
 }

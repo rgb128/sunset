@@ -4,11 +4,11 @@
 // CONSTANTS & CONFIGURATION
 // ==========================================
 
-// System & Fixed Layout Resolution
+// System & Fixed Canvas Resolution (1000x1000 base, ready for 3000x1000)
 const CANVAS_ID = 'main-canvas';
 const CTX_TYPE = '2d';
-const VIRTUAL_WIDTH = 2000;
-const VIRTUAL_HEIGHT = 1000;
+const CANVAS_BASE_WIDTH = 1000;
+const CANVAS_BASE_HEIGHT = 1000;
 const NUM_CHANNELS = 4;
 const MATH_HALF = 0.5;
 const BASE_TEN = 10;
@@ -60,19 +60,15 @@ const PIXEL_DATA_STEP = 4;
 
 // Horizon Silhouette
 const SILHOUETTE_COLOR = '#000000';
-const SILHOUETTE_HEIGHT_RATIO = 0.15;
+const SILHOUETTE_HEIGHT_RATIO = 0.2;
 const SILHOUETTE_OCTAVES = 4;
 const MOUNTAIN_STEP = 2;
-
-// Timing Constants
-const RESIZE_DEBOUNCE_DELAY_MS = 300;
-const TIME_RESYNC_INTERVAL_MS = 5000; // Resync time with API every 5 seconds
 
 // Global runtime variables for synchronization and animation control
 let currentAnimationId = null;
 let isRegenerating = false;
 let serverTimeOffsetMs = 0;
-const GLOBAL_MASTER_SEED = 133799; // Universal constant seed for identical geometry layout everywhere
+const GLOBAL_MASTER_SEED = 133799;
 
 // ==========================================
 // SEEDED PRNG (Mulberry32)
@@ -120,7 +116,7 @@ const fetchHighPrecisionTimeOffset = async () => {
             serverTimeOffsetMs = serverTimeMs - Date.now();
         }
     } catch (error) {
-        // Keep existing offset if both fail
+        serverTimeOffsetMs = 0;
     }
 };
 
@@ -131,7 +127,7 @@ const getSynchronizedTimeMs = () => {
 const startBackgroundTimeResync = () => {
     setInterval(async () => {
         await fetchHighPrecisionTimeOffset();
-    }, TIME_RESYNC_INTERVAL_MS);
+    }, 5000);
 };
 
 // ==========================================
@@ -210,7 +206,7 @@ const getColorForValue = (value) => {
 };
 
 // ==========================================
-// OFFSCREEN SUNSET GENERATION
+// OFFSCREEN SUNSET GENERATION (Fixed Canvas)
 // ==========================================
 
 const drawLandscape = (ctx, width, height) => {
@@ -287,7 +283,7 @@ const createOffscreenSunset = (width, height) => {
 };
 
 // ==========================================
-// UNIVERSALLY DETERMINISTIC PARTICLE SYSTEM
+// DETERMINISTIC PARTICLE SYSTEM
 // ==========================================
 
 const initCubistParticles = (targetArea) => {
@@ -298,93 +294,97 @@ const initCubistParticles = (targetArea) => {
         
         particles.push({
             id: i,
-            baseX: getSeededFloat(particleSeed + 1, 0, VIRTUAL_WIDTH),
-            baseY: getSeededFloat(particleSeed + 2, 0, VIRTUAL_HEIGHT),
+            baseX: getSeededFloat(particleSeed + 1, 0, CANVAS_BASE_WIDTH),
+            baseY: getSeededFloat(particleSeed + 2, 0, CANVAS_BASE_HEIGHT),
             vx: getSeededFloat(particleSeed + 3, DRIFT_SPEED_MIN, DRIFT_SPEED_MAX) * (getSeededRandom(particleSeed + 4) < 0.5 ? 1 : -1),
             vy: getSeededFloat(particleSeed + 5, DRIFT_SPEED_MIN, DRIFT_SPEED_MAX) * (getSeededRandom(particleSeed + 6) < 0.5 ? 1 : -1),
             ratioSeed: getSeededFloat(particleSeed + 7, 0, 100),
-            virtualArea: targetArea
+            area: targetArea
         });
     }
 
     return particles;
 };
 
-const updateAndDrawParticles = (ctx, screenWidth, screenHeight, localPixels, particles, timeMs) => {
+const updateAndDrawParticles = (ctx, width, height, pixels, particles, timeMs) => {
     ctx.fillStyle = MAIN_BG_COLOR;
-    ctx.fillRect(0, 0, screenWidth, screenHeight);
+    ctx.fillRect(0, 0, width, height);
 
     const t = timeMs * TIME_SCALE;
-
-    const scaleX = screenWidth / VIRTUAL_WIDTH;
-    const scaleY = screenHeight / VIRTUAL_HEIGHT;
 
     for (let i = 0; i < particles.length; i++) {
         const p = particles[i];
 
-        let vx = (p.baseX + (p.vx * t * 50)) % VIRTUAL_WIDTH;
-        let vy = (p.baseY + (p.vy * t * 50)) % VIRTUAL_HEIGHT;
+        let vx = (p.baseX + (p.vx * t * 50)) % width;
+        let vy = (p.baseY + (p.vy * t * 50)) % height;
 
-        if (vx < 0) vx += VIRTUAL_WIDTH;
-        if (vy < 0) vy += VIRTUAL_HEIGHT;
+        if (vx < 0) vx += width;
+        if (vy < 0) vy += height;
 
         const ratioWave = Math.sin(t * MORPH_SPEED * 10 + p.ratioSeed);
         const currentRatioPower = lerp(RATIO_EXP_MIN, RATIO_EXP_MAX, (ratioWave + 1) * MATH_HALF);
 
         const ratio = Math.pow(BASE_TEN, currentRatioPower);
-        const virtualRectWidth = Math.sqrt(p.virtualArea * ratio);
-        const virtualRectHeight = Math.sqrt(p.virtualArea / ratio);
+        const rectWidth = Math.sqrt(p.area * ratio);
+        const rectHeight = Math.sqrt(p.area / ratio);
 
-        const screenPx = vx * scaleX;
-        const screenPy = vy * scaleY;
-        const screenRectWidth = virtualRectWidth * scaleX;
-        const screenRectHeight = virtualRectHeight * scaleY;
+        const sampleX = Math.floor(vx);
+        const sampleY = Math.floor(vy);
+        const pixelIndex = (sampleY * width + sampleX) * NUM_CHANNELS;
 
-        const sampleX = Math.floor(screenPx);
-        const sampleY = Math.floor(screenPy);
-        const clampedSampleX = Math.max(0, Math.min(screenWidth - 1, sampleX));
-        const clampedSampleY = Math.max(0, Math.min(screenHeight - 1, sampleY));
-        const pixelIndex = (clampedSampleY * screenWidth + clampedSampleX) * NUM_CHANNELS;
+        const r = pixels[pixelIndex];
+        const g = pixels[pixelIndex + 1];
+        const b = pixels[pixelIndex + 2];
 
-        const r = localPixels[pixelIndex];
-        const g = localPixels[pixelIndex + 1];
-        const b = localPixels[pixelIndex + 2];
-
-        const drawX = screenPx - (screenRectWidth * MATH_HALF);
-        const drawY = screenPy - (screenRectHeight * MATH_HALF);
+        const drawX = vx - (rectWidth * MATH_HALF);
+        const drawY = vy - (rectHeight * MATH_HALF);
 
         ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
-        ctx.fillRect(drawX, drawY, screenRectWidth, screenRectHeight);
+        ctx.fillRect(drawX, drawY, rectWidth, rectHeight);
     }
 };
 
 // ==========================================
-// RESIZE & SYNCHRONIZED EXECUTION
+// SCALING & COVER HEIGHT LAYOUT HANDLER
+// ==========================================
+
+const updateCanvasHeightCoverScaling = (canvas) => {
+    const viewport = canvas.parentElement;
+    const viewportWidth = viewport.clientWidth;
+    const viewportHeight = viewport.clientHeight;
+
+    // Scale strictly based on height to pin top and bottom to screen edges
+    const scale = viewportHeight / CANVAS_BASE_HEIGHT;
+
+    const scaledWidth = CANVAS_BASE_WIDTH * scale;
+    const scaledHeight = CANVAS_BASE_HEIGHT * scale;
+
+    canvas.style.width = scaledWidth + 'px';
+    canvas.style.height = scaledHeight + 'px';
+    // Center horizontally, meaning excess width on sides gets cropped by viewport overflow: hidden
+    canvas.style.left = ((viewportWidth - scaledWidth) * MATH_HALF) + 'px';
+    canvas.style.top = '0px';
+};
+
+// ==========================================
+// SYNCHRONIZED EXECUTION
 // ==========================================
 
 const generateAnimatedSunset = async () => {
-    if (isRegenerating) {
-        return;
-    }
-    isRegenerating = true;
-
     await fetchHighPrecisionTimeOffset();
 
     const canvas = document.getElementById(CANVAS_ID);
     const ctx = canvas.getContext(CTX_TYPE);
     
-    const screenWidth = window.innerWidth;
-    const screenHeight = window.innerHeight;
-    
-    canvas.width = screenWidth;
-    canvas.height = screenHeight;
-    canvas.style.width = screenWidth + 'px';
-    canvas.style.height = screenHeight + 'px';
+    canvas.width = CANVAS_BASE_WIDTH;
+    canvas.height = CANVAS_BASE_HEIGHT;
 
-    const localSunsetData = createOffscreenSunset(screenWidth, screenHeight);
-    const localPixels = localSunsetData.data;
+    updateCanvasHeightCoverScaling(canvas);
 
-    const targetArea = (VIRTUAL_WIDTH * VIRTUAL_HEIGHT) * AREA_FRACTION;
+    const sunsetData = createOffscreenSunset(CANVAS_BASE_WIDTH, CANVAS_BASE_HEIGHT);
+    const pixels = sunsetData.data;
+
+    const targetArea = (CANVAS_BASE_WIDTH * CANVAS_BASE_HEIGHT) * AREA_FRACTION;
     const particles = initCubistParticles(targetArea);
 
     if (currentAnimationId) {
@@ -393,27 +393,11 @@ const generateAnimatedSunset = async () => {
 
     const animate = () => {
         const syncTimeMs = getSynchronizedTimeMs();
-        updateAndDrawParticles(ctx, screenWidth, screenHeight, localPixels, particles, syncTimeMs);
+        updateAndDrawParticles(ctx, CANVAS_BASE_WIDTH, CANVAS_BASE_HEIGHT, pixels, particles, syncTimeMs);
         currentAnimationId = requestAnimationFrame(animate);
     };
 
     currentAnimationId = requestAnimationFrame(animate);
-    isRegenerating = false;
-};
-
-const setupResizeHandler = () => {
-    let resizeTimer = null;
-
-    window.addEventListener('resize', () => {
-        if (isRegenerating) {
-            return;
-        }
-
-        clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(() => {
-            generateAnimatedSunset();
-        }, RESIZE_DEBOUNCE_DELAY_MS);
-    });
 };
 
 // ==========================================
@@ -424,9 +408,7 @@ window.onload = async () => {
     const canvas = document.getElementById(CANVAS_ID);
     
     canvas.addEventListener('click', () => {
-        if (!isRegenerating) {
-            generateAnimatedSunset();
-        }
+        generateAnimatedSunset();
     });
     
     await generateAnimatedSunset();
@@ -437,7 +419,10 @@ window.onload = async () => {
         });
     });
 
-    setupResizeHandler();
+    window.addEventListener('resize', () => {
+        updateCanvasHeightCoverScaling(canvas);
+    });
+
     startBackgroundTimeResync();
 };
 
@@ -458,8 +443,8 @@ const toggleDebugOriginalSunset = (enable) => {
 
     if (enable) {
         if (!debugCanvas) {
-            const width = window.innerWidth;
-            const height = window.innerHeight;
+            const width = CANVAS_BASE_WIDTH;
+            const height = CANVAS_BASE_HEIGHT;
             
             const sunsetImageData = createOffscreenSunset(width, height);
             
@@ -475,7 +460,7 @@ const toggleDebugOriginalSunset = (enable) => {
             debugCanvas.style.height = '100vh';
             debugCanvas.style.zIndex = '99999';
             debugCanvas.style.display = 'block';
-            debugCanvas.style.objectFit = 'fill';
+            debugCanvas.style.objectFit = 'cover';
             
             const debugCtx = debugCanvas.getContext('2d');
             debugCtx.putImageData(sunsetImageData, 0, 0);
