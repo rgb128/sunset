@@ -4,10 +4,10 @@
 // CONSTANTS & CONFIGURATION
 // ==========================================
 
-// System & Fixed Canvas Resolution (1000x1000 base, ready for 3000x1000)
+// System & Fixed Canvas Resolution (3000x1000)
 const CANVAS_ID = 'main-canvas';
 const CTX_TYPE = '2d';
-const CANVAS_BASE_WIDTH = 1000;
+const CANVAS_BASE_WIDTH = 3000;
 const CANVAS_BASE_HEIGHT = 1000;
 const NUM_CHANNELS = 4;
 const MATH_HALF = 0.5;
@@ -60,7 +60,7 @@ const PIXEL_DATA_STEP = 4;
 
 // Horizon Silhouette
 const SILHOUETTE_COLOR = '#000000';
-const SILHOUETTE_HEIGHT_RATIO = 0.2;
+const SILHOUETTE_HEIGHT_RATIO = 0.15;
 const SILHOUETTE_OCTAVES = 4;
 const MOUNTAIN_STEP = 2;
 
@@ -68,7 +68,8 @@ const MOUNTAIN_STEP = 2;
 let currentAnimationId = null;
 let isRegenerating = false;
 let serverTimeOffsetMs = 0;
-const GLOBAL_MASTER_SEED = 133799;
+let dailyMasterSeed = 133799; // Fallback seed
+const UNIVERSAL_RECTANGLE_SEED = 999999; // Always identical for everyone worldwide
 
 // ==========================================
 // SEEDED PRNG (Mulberry32)
@@ -89,9 +90,9 @@ const getSeededFloat = (seedValue, min, max) => {
 // HIGH-PRECISION TIME SYNCHRONIZATION (time.now API)
 // ==========================================
 
-const fetchHighPrecisionTimeOffset = async () => {
-    const startLocalMs = performance.now();
+const fetchTimeAndBuildDailySeed = async () => {
     try {
+        const startLocalMs = performance.now();
         const response = await fetch('https://time.now/developer/api/time', { cache: 'no-store' });
         const data = await response.json();
         
@@ -102,6 +103,10 @@ const fetchHighPrecisionTimeOffset = async () => {
             
             const currentLocalMs = Date.now();
             serverTimeOffsetMs = (serverTimeMs + networkLatency) - currentLocalMs;
+
+            // Extract YYYYMMDD from datetime string (e.g., "2026-10-24T...")
+            const dateStr = data.datetime.substring(0, 10).replace(/-/g, '');
+            dailyMasterSeed = parseInt(dateStr, 10);
             return;
         }
     } catch (error) {
@@ -112,12 +117,25 @@ const fetchHighPrecisionTimeOffset = async () => {
         const response = await fetch(window.location.href, { method: 'HEAD', cache: 'no-store' });
         const dateHeader = response.headers.get('Date');
         if (dateHeader) {
-            const serverTimeMs = new Date(dateHeader).getTime();
-            serverTimeOffsetMs = serverTimeMs - Date.now();
+            const serverDate = new Date(dateHeader);
+            serverTimeOffsetMs = serverDate.getTime() - Date.now();
+            
+            const yyyy = serverDate.getUTCFullYear();
+            const mm = String(serverDate.getUTCMonth() + 1).padStart(2, '0');
+            const dd = String(serverDate.getUTCDate()).padStart(2, '0');
+            dailyMasterSeed = parseInt(`${yyyy}${mm}${dd}`, 10);
+            return;
         }
     } catch (error) {
         serverTimeOffsetMs = 0;
     }
+
+    // Ultimate fallback if everything fails
+    const fallbackDate = new Date();
+    const yyyy = fallbackDate.getUTCFullYear();
+    const mm = String(fallbackDate.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(fallbackDate.getUTCDate()).padStart(2, '0');
+    dailyMasterSeed = parseInt(`${yyyy}${mm}${dd}`, 10);
 };
 
 const getSynchronizedTimeMs = () => {
@@ -126,8 +144,8 @@ const getSynchronizedTimeMs = () => {
 
 const startBackgroundTimeResync = () => {
     setInterval(async () => {
-        await fetchHighPrecisionTimeOffset();
-    }, 5000);
+        await fetchTimeAndBuildDailySeed();
+    }, 10000);
 };
 
 // ==========================================
@@ -206,15 +224,15 @@ const getColorForValue = (value) => {
 };
 
 // ==========================================
-// OFFSCREEN SUNSET GENERATION (Fixed Canvas)
+// OFFSCREEN SUNSET GENERATION (Daily Master Seed)
 // ==========================================
 
-const drawLandscape = (ctx, width, height) => {
+const drawLandscape = (ctx, width, height, seed) => {
     const imageData = ctx.createImageData(width, height);
     const data = imageData.data;
     
-    const offsetX = getSeededFloat(GLOBAL_MASTER_SEED + 1, 0, 1000);
-    const offsetY = getSeededFloat(GLOBAL_MASTER_SEED + 2, 0, 1000);
+    const offsetX = getSeededFloat(seed + 1, 0, 1000);
+    const offsetY = getSeededFloat(seed + 2, 0, 1000);
     
     for (let y = 0; y < height; y++) {
         const normalizedY = y / height;
@@ -223,13 +241,13 @@ const drawLandscape = (ctx, width, height) => {
             const nx = (x + offsetX) * SCALE_X;
             const ny = (y + offsetY) * SCALE_Y;
             
-            const warp1 = fbm(nx, ny, NOISE_OCTAVES, GLOBAL_MASTER_SEED + 10);
-            const warp2 = fbm(nx + WARP_OFFSET, ny + WARP_OFFSET, NOISE_OCTAVES, GLOBAL_MASTER_SEED + 20);
+            const warp1 = fbm(nx, ny, NOISE_OCTAVES, seed + 10);
+            const warp2 = fbm(nx + WARP_OFFSET, ny + WARP_OFFSET, NOISE_OCTAVES, seed + 20);
             
             const distortedX = nx + (warp1 * WARP_STRENGTH_X);
             const distortedY = ny + (warp2 * WARP_STRENGTH_Y);
             
-            const noiseVal = fbm(distortedX, distortedY, NOISE_OCTAVES, GLOBAL_MASTER_SEED + 30);
+            const noiseVal = fbm(distortedX, distortedY, NOISE_OCTAVES, seed + 30);
             
             const finalValue = (noiseVal * 0.4) + (normalizedY * 0.6);
             
@@ -246,16 +264,16 @@ const drawLandscape = (ctx, width, height) => {
     ctx.putImageData(imageData, 0, 0);
 };
 
-const drawHorizonSilhouette = (ctx, width, height) => {
+const drawHorizonSilhouette = (ctx, width, height, seed) => {
     const maxMountainHeight = height * SILHOUETTE_HEIGHT_RATIO;
-    const mountainSeed = getSeededFloat(GLOBAL_MASTER_SEED + 40, 0, 1000);
+    const mountainSeed = getSeededFloat(seed + 40, 0, 1000);
     
     ctx.beginPath();
     ctx.moveTo(0, height);
     
     for (let x = 0; x <= width; x += MOUNTAIN_STEP) {
         const nx = x * 0.005;
-        const noiseVal = fbm(nx + mountainSeed, mountainSeed, SILHOUETTE_OCTAVES, GLOBAL_MASTER_SEED + 50);
+        const noiseVal = fbm(nx + mountainSeed, mountainSeed, SILHOUETTE_OCTAVES, seed + 50);
         
         const yOffset = noiseVal * maxMountainHeight;
         const yPos = height - yOffset;
@@ -270,27 +288,28 @@ const drawHorizonSilhouette = (ctx, width, height) => {
     ctx.fill();
 };
 
-const createOffscreenSunset = (width, height) => {
+const createOffscreenSunset = (width, height, seed) => {
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext(CTX_TYPE);
 
-    drawLandscape(ctx, width, height);
-    drawHorizonSilhouette(ctx, width, height);
+    drawLandscape(ctx, width, height, seed);
+    drawHorizonSilhouette(ctx, width, height, seed);
 
     return ctx.getImageData(0, 0, width, height);
 };
 
 // ==========================================
-// DETERMINISTIC PARTICLE SYSTEM
+// UNIVERSALLY DETERMINISTIC PARTICLE SYSTEM
 // ==========================================
 
 const initCubistParticles = (targetArea) => {
     const particles = [];
 
     for (let i = 0; i < RECTANGLE_COUNT; i++) {
-        const particleSeed = GLOBAL_MASTER_SEED + i * 7;
+        // Uses UNIVERSAL_RECTANGLE_SEED so rectangles are 100% identical for everyone worldwide
+        const particleSeed = UNIVERSAL_RECTANGLE_SEED + i * 7;
         
         particles.push({
             id: i,
@@ -353,7 +372,6 @@ const updateCanvasHeightCoverScaling = (canvas) => {
     const viewportWidth = viewport.clientWidth;
     const viewportHeight = viewport.clientHeight;
 
-    // Scale strictly based on height to pin top and bottom to screen edges
     const scale = viewportHeight / CANVAS_BASE_HEIGHT;
 
     const scaledWidth = CANVAS_BASE_WIDTH * scale;
@@ -361,7 +379,6 @@ const updateCanvasHeightCoverScaling = (canvas) => {
 
     canvas.style.width = scaledWidth + 'px';
     canvas.style.height = scaledHeight + 'px';
-    // Center horizontally, meaning excess width on sides gets cropped by viewport overflow: hidden
     canvas.style.left = ((viewportWidth - scaledWidth) * MATH_HALF) + 'px';
     canvas.style.top = '0px';
 };
@@ -370,8 +387,13 @@ const updateCanvasHeightCoverScaling = (canvas) => {
 // SYNCHRONIZED EXECUTION
 // ==========================================
 
-const generateAnimatedSunset = async () => {
-    await fetchHighPrecisionTimeOffset();
+const generateAnimatedSunset = async (isManualClick = false) => {
+    if (isRegenerating) {
+        return;
+    }
+    isRegenerating = true;
+
+    await fetchTimeAndBuildDailySeed();
 
     const canvas = document.getElementById(CANVAS_ID);
     const ctx = canvas.getContext(CTX_TYPE);
@@ -381,7 +403,10 @@ const generateAnimatedSunset = async () => {
 
     updateCanvasHeightCoverScaling(canvas);
 
-    const sunsetData = createOffscreenSunset(CANVAS_BASE_WIDTH, CANVAS_BASE_HEIGHT);
+    // If clicked manually, generate a random seed for testing purposes, otherwise use daily seed
+    const activeSeed = isManualClick ? Math.floor(Math.random() * 100000000) : dailyMasterSeed;
+
+    const sunsetData = createOffscreenSunset(CANVAS_BASE_WIDTH, CANVAS_BASE_HEIGHT, activeSeed);
     const pixels = sunsetData.data;
 
     const targetArea = (CANVAS_BASE_WIDTH * CANVAS_BASE_HEIGHT) * AREA_FRACTION;
@@ -393,11 +418,13 @@ const generateAnimatedSunset = async () => {
 
     const animate = () => {
         const syncTimeMs = getSynchronizedTimeMs();
+        // const syncTimeMs = isManualClick ? performance.now() : getSynchronizedTimeMs();
         updateAndDrawParticles(ctx, CANVAS_BASE_WIDTH, CANVAS_BASE_HEIGHT, pixels, particles, syncTimeMs);
         currentAnimationId = requestAnimationFrame(animate);
     };
 
     currentAnimationId = requestAnimationFrame(animate);
+    isRegenerating = false;
 };
 
 // ==========================================
@@ -408,10 +435,12 @@ window.onload = async () => {
     const canvas = document.getElementById(CANVAS_ID);
     
     canvas.addEventListener('click', () => {
-        generateAnimatedSunset();
+        if (!isRegenerating) {
+            generateAnimatedSunset(true); // true triggers local random mode on click
+        }
     });
     
-    await generateAnimatedSunset();
+    await generateAnimatedSunset(false); // false triggers daily synchronized mode on load
     
     requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -446,7 +475,7 @@ const toggleDebugOriginalSunset = (enable) => {
             const width = CANVAS_BASE_WIDTH;
             const height = CANVAS_BASE_HEIGHT;
             
-            const sunsetImageData = createOffscreenSunset(width, height);
+            const sunsetImageData = createOffscreenSunset(width, height, dailyMasterSeed);
             
             debugCanvas = document.createElement('canvas');
             debugCanvas.id = DEBUG_ELEMENT_ID;
