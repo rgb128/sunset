@@ -4,11 +4,9 @@
 // CONSTANTS & CONFIGURATION
 // ==========================================
 
-// System & Virtual Resolution (2000x2000 base)
+// System
 const CANVAS_ID = 'main-canvas';
 const CTX_TYPE = '2d';
-const VIRTUAL_WIDTH = 2000;
-const VIRTUAL_HEIGHT = 2000;
 const NUM_CHANNELS = 4;
 const MATH_HALF = 0.5;
 const BASE_TEN = 10;
@@ -57,10 +55,18 @@ const RGB_ALPHA_OPAQUE = 255;
 const PIXEL_DATA_STEP = 4;
 
 // Horizon Silhouette
-const SILHOUETTE_COLOR = 'black';
+const SILHOUETTE_COLOR = '#000000';
 const SILHOUETTE_HEIGHT_RATIO = 0.15;
 const SILHOUETTE_OCTAVES = 4;
 const MOUNTAIN_STEP = 2;
+
+// Resize & Regeneration Timing Constants
+const RESIZE_DEBOUNCE_DELAY_MS = 300;
+const REGENERATE_SHOW_DELAY_MS = 2000;
+
+// Global runtime variables for animation control
+let currentAnimationId = null;
+let isRegenerating = false;
 
 // ==========================================
 // UTILITIES & NOISE GENERATOR
@@ -293,58 +299,107 @@ const updateAndDrawParticles = (ctx, width, height, pixels, particles) => {
     }
 };
 
-// Handles resizing and scaling canvas to match background-size: cover behavior (bottom-center anchored)
-// Handles resizing and scaling canvas to match background-size: cover behavior (always pinned to bottom-center)
-const updateCanvasCoverScaling = (canvas) => {
-    const viewport = canvas.parentElement;
-    const viewportWidth = viewport.clientWidth;
-    const viewportHeight = viewport.clientHeight;
+// ==========================================
+// OVERLAY & RESIZE HANDLING
+// ==========================================
 
-    const viewportAspect = viewportWidth / viewportHeight;
-    const canvasAspect = VIRTUAL_WIDTH / VIRTUAL_HEIGHT;
-
-    let scale = 1;
-    if (viewportAspect > canvasAspect) {
-        scale = viewportWidth / VIRTUAL_WIDTH;
-    } else {
-        scale = viewportHeight / VIRTUAL_HEIGHT;
+const ensureOverlayElement = () => {
+    let overlay = document.getElementById('regeneration-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'regeneration-overlay';
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0px';
+        overlay.style.left = '0px';
+        overlay.style.width = '100vw';
+        overlay.style.height = '100vh';
+        overlay.style.backgroundColor = '#000000';
+        overlay.style.color = '#808080';
+        overlay.style.display = 'flex';
+        overlay.style.justifyContent = 'center';
+        overlay.style.alignItems = 'center';
+        overlay.style.fontSize = '24px';
+        overlay.style.fontWeight = 'bold';
+        overlay.style.fontFamily = 'sans-serif';
+        overlay.style.zIndex = '999999';
+        overlay.style.opacity = '0';
+        overlay.style.transition = 'opacity 0.5s ease-in-out';
+        overlay.style.pointerEvents = 'none';
+        overlay.textContent = 'regenerating...';
+        document.body.appendChild(overlay);
     }
+    return overlay;
+};
 
-    const scaledWidth = VIRTUAL_WIDTH * scale;
-    const scaledHeight = VIRTUAL_HEIGHT * scale;
-
-    canvas.style.width = scaledWidth + 'px';
-    canvas.style.height = scaledHeight + 'px';
-    canvas.style.left = ((viewportWidth - scaledWidth) * MATH_HALF) + 'px';
-    
-    // Always align the bottom of the canvas to the bottom of the viewport
-    canvas.style.top = (viewportHeight - scaledHeight) + 'px';
+const setOverlayVisible = (visible) => {
+    const overlay = ensureOverlayElement();
+    if (visible) {
+        overlay.style.pointerEvents = 'auto';
+        overlay.style.opacity = '1';
+    } else {
+        overlay.style.opacity = '0';
+        setTimeout(() => {
+            overlay.style.pointerEvents = 'none';
+        }, 500);
+    }
 };
 
 const generateAnimatedSunset = () => {
     const canvas = document.getElementById(CANVAS_ID);
     const ctx = canvas.getContext(CTX_TYPE);
+    
+    // Fixed high-res base dimensions so stretching always looks clean and sharp
+    const baseWidth = 2000;
+    const baseHeight = 1000;
+    
+    canvas.width = baseWidth;
+    canvas.height = baseHeight;
 
-    canvas.width = VIRTUAL_WIDTH;
-    canvas.height = VIRTUAL_HEIGHT;
-
-    updateCanvasCoverScaling(canvas);
-    window.addEventListener('resize', () => {
-        updateCanvasCoverScaling(canvas);
-    });
-
-    const sunsetData = createOffscreenSunset(VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+    const sunsetData = createOffscreenSunset(baseWidth, baseHeight);
     const pixels = sunsetData.data;
 
-    const targetArea = (VIRTUAL_WIDTH * VIRTUAL_HEIGHT) * AREA_FRACTION;
-    const particles = initCubistParticles(VIRTUAL_WIDTH, VIRTUAL_HEIGHT, targetArea);
+    const targetArea = (baseWidth * baseHeight) * AREA_FRACTION;
+    const particles = initCubistParticles(baseWidth, baseHeight, targetArea);
+
+    if (currentAnimationId) {
+        cancelAnimationFrame(currentAnimationId);
+    }
 
     const animate = () => {
-        updateAndDrawParticles(ctx, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, pixels, particles);
-        requestAnimationFrame(animate);
+        updateAndDropParticlesSafe(ctx, baseWidth, baseHeight, pixels, particles);
+        currentAnimationId = requestAnimationFrame(animate);
     };
 
-    requestAnimationFrame(animate);
+    const updateAndDropParticlesSafe = (c, w, h, pix, parts) => {
+        if (!isRegenerating) {
+            updateAndDrawParticles(c, w, h, pix, parts);
+        }
+    };
+
+    currentAnimationId = requestAnimationFrame(animate);
+};
+
+const setupResizeHandler = () => {
+    let resizeTimer = null;
+
+    window.addEventListener('resize', () => {
+        if (isRegenerating) {
+            return;
+        }
+
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            isRegenerating = true;
+            setOverlayVisible(true);
+
+            setTimeout(() => {
+                generateAnimatedSunset();
+                isRegenerating = false;
+                setOverlayVisible(false);
+            }, REGENERATE_SHOW_DELAY_MS);
+
+        }, RESIZE_DEBOUNCE_DELAY_MS);
+    });
 };
 
 // ==========================================
@@ -353,6 +408,7 @@ const generateAnimatedSunset = () => {
 
 window.onload = () => {
     generateAnimatedSunset();
+    setupResizeHandler();
 };
 
 // ==========================================
@@ -372,8 +428,8 @@ const toggleDebugOriginalSunset = (enable) => {
 
     if (enable) {
         if (!debugCanvas) {
-            const width = VIRTUAL_WIDTH;
-            const height = VIRTUAL_HEIGHT;
+            const width = window.innerWidth;
+            const height = window.innerHeight;
             
             const sunsetImageData = createOffscreenSunset(width, height);
             

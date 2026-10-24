@@ -25,13 +25,13 @@ html, body {
     max-height: 100vh;
     overflow: hidden;
     background-color: #000000;
-    display: flex;
-    justify-content: center;
-    align-items: center;
 }
 
 #main-canvas {
-    position: absolute;
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: fill; /* Forces the canvas to stretch/squeeze to fill bounds */
 }
 
 /* Controls / Buttons Section */
