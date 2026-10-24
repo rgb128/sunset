@@ -64,8 +64,9 @@ const SILHOUETTE_HEIGHT_RATIO = 0.15;
 const SILHOUETTE_OCTAVES = 4;
 const MOUNTAIN_STEP = 2;
 
-// Resize Timing Constants
+// Timing Constants
 const RESIZE_DEBOUNCE_DELAY_MS = 300;
+const TIME_RESYNC_INTERVAL_MS = 5000; // Resync time with API every 5 seconds
 
 // Global runtime variables for synchronization and animation control
 let currentAnimationId = null;
@@ -119,12 +120,18 @@ const fetchHighPrecisionTimeOffset = async () => {
             serverTimeOffsetMs = serverTimeMs - Date.now();
         }
     } catch (error) {
-        serverTimeOffsetMs = 0;
+        // Keep existing offset if both fail
     }
 };
 
 const getSynchronizedTimeMs = () => {
     return Date.now() + serverTimeOffsetMs;
+};
+
+const startBackgroundTimeResync = () => {
+    setInterval(async () => {
+        await fetchHighPrecisionTimeOffset();
+    }, TIME_RESYNC_INTERVAL_MS);
 };
 
 // ==========================================
@@ -431,6 +438,7 @@ window.onload = async () => {
     });
 
     setupResizeHandler();
+    startBackgroundTimeResync();
 };
 
 // ==========================================
