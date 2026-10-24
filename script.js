@@ -11,12 +11,15 @@ const NUM_CHANNELS = 4;
 const MATH_HALF = 0.5;
 const BASE_TEN = 10;
 
-// Algorithm Configuration (User Requested)
-const RECTANGLE_COUNT = 18000;
+// Algorithm Configuration
+const RECTANGLE_COUNT = 4000;      // Lowered slightly to ensure buttery 60 FPS animation
 const AREA_FRACTION = 0.01;
 const MAIN_BG_COLOR = '#808080';
 
-// Ratio Math (Logarithmic scale for ratios)
+// Animation & Physics Constants
+const DRIFT_SPEED_MIN = 0.2;
+const DRIFT_SPEED_MAX = 0.8;
+const MORPH_SPEED = 0.02;          // Speed at which aspect ratios smoothly morph
 const RATIO_EXP_MIN = -1.6;
 const RATIO_EXP_MAX = 1.6;
 
@@ -35,12 +38,11 @@ const WARP_STRENGTH_Y = 1.0;
 const WARP_OFFSET = 5.2;
 
 // Landscape Configuration
-const HORIZON_RATIO = 0.52;        // Horizon line just below the middle
-const WATER_RIPPLE_SCALE = 1.8;    // Stretches noise horizontally in the water
-const WATER_DARKEN_FACTOR = 0.85;  // Makes the reflection slightly deeper than the sky
+const HORIZON_RATIO = 0.52;
+const WATER_RIPPLE_SCALE = 1.8;
+const WATER_DARKEN_FACTOR = 0.85;
 
-// Rich Sunset Palette (Based on Reference Photo)
-// Sky top (Deep Blue) down to Horizon (Pale Yellow)
+// Rich Sunset Palette
 const PALETTE = [
     { r: 25,  g: 30,  b: 95  }, // Deep Blue
     { r: 100, g: 30,  b: 110 }, // Purple / Violet
@@ -54,7 +56,7 @@ const PALETTE_OFFSET = 1;
 const RGB_ALPHA_OPAQUE = 255;
 const PIXEL_DATA_STEP = 4;
 
-// Horizon Silhouette (Islands/Trees)
+// Horizon Silhouette
 const SILHOUETTE_COLOR = '#050308';
 const SILHOUETTE_HEIGHT_RATIO = 0.05;
 const SILHOUETTE_OCTAVES = 4;
@@ -72,6 +74,10 @@ const getRandomInt = (min, max) => {
     return Math.floor(Math.random() * (max - min + 1)) + min;
 };
 
+const lerp = (a, b, t) => {
+    return a + (b - a) * t;
+};
+
 const randomTable = new Float32Array(TABLE_SIZE * 2);
 for (let i = 0; i < TABLE_SIZE * 2; i++) {
     randomTable[i] = Math.random();
@@ -79,10 +85,6 @@ for (let i = 0; i < TABLE_SIZE * 2; i++) {
 
 const smoothstep = (t) => {
     return t * t * (3 - 2 * t);
-};
-
-const lerp = (a, b, t) => {
-    return a + (b - a) * t;
 };
 
 const noise2D = (x, y) => {
@@ -162,15 +164,10 @@ const drawLandscape = (ctx, width, height) => {
     
     for (let y = 0; y < height; y++) {
         const isWater = y > horizonY;
-        
-        // Mirror the Y coordinate if we are below the horizon
         const mappedY = isWater ? horizonY - (y - horizonY) : y;
-        
-        // 0.0 at top of sky, 1.0 at horizon line
         const normalizedY = mappedY / horizonY; 
         
         for (let x = 0; x < width; x++) {
-            // Stretch the horizontal noise slightly more in the water to simulate perspective/ripples
             const waterStretch = isWater ? WATER_RIPPLE_SCALE : 1.0;
             
             const nx = (x + offsetX) * SCALE_X * waterStretch;
@@ -184,12 +181,11 @@ const drawLandscape = (ctx, width, height) => {
             
             const noiseVal = fbm(distortedX, distortedY, NOISE_OCTAVES);
             
-            // Push colors harder towards the bottom (horizon)
             const elevationFactor = Math.pow(normalizedY, 1.3);
             let finalValue = (noiseVal * 0.5) + (elevationFactor * 0.65);
             
             if (isWater) {
-                finalValue *= WATER_DARKEN_FACTOR; // Water is slightly darker than sky
+                finalValue *= WATER_DARKEN_FACTOR;
             }
             
             const color = getColorForValue(finalValue);
@@ -211,16 +207,11 @@ const drawHorizonSilhouette = (ctx, width, height) => {
     const mountainSeed = Math.random() * 1000;
     
     ctx.beginPath();
-    // Start at the left edge, on the horizon
     ctx.moveTo(0, horizonY);
     
-    // Draw the jagged top edge of the islands/trees
     for (let x = 0; x <= width; x += MOUNTAIN_STEP) {
         const nx = x * 0.004;
-        // Use high-frequency noise for a tree-line/island look
         const noiseVal = fbm(nx + mountainSeed, mountainSeed, SILHOUETTE_OCTAVES);
-        
-        // Islands sporadically emerge (pow lowers the low values)
         const islandMask = Math.pow(noiseVal, 2.5); 
         
         const yOffset = islandMask * maxIslandHeight;
@@ -229,13 +220,12 @@ const drawHorizonSilhouette = (ctx, width, height) => {
         ctx.lineTo(x, yPos);
     }
     
-    // Draw the reflection (bottom edge of the islands in the water)
     for (let x = width; x >= 0; x -= MOUNTAIN_STEP) {
         const nx = x * 0.004;
         const noiseVal = fbm(nx + mountainSeed, mountainSeed, SILHOUETTE_OCTAVES);
         
         const islandMask = Math.pow(noiseVal, 2.5);
-        const yOffset = islandMask * maxIslandHeight * 0.6; // Reflection is a bit shorter
+        const yOffset = islandMask * maxIslandHeight * 0.6;
         const yPos = horizonY + yOffset;
         
         ctx.lineTo(x, yPos);
@@ -259,10 +249,80 @@ const createOffscreenSunset = (width, height) => {
 };
 
 // ==========================================
-// MAIN ALGORITHM
+// ANIMATED CUBIST MOSAIC SYSTEM
 // ==========================================
 
-const generateAlgorithmicSunset = () => {
+const initCubistParticles = (width, height, targetArea) => {
+    const particles = [];
+
+    for (let i = 0; i < RECTANGLE_COUNT; i++) {
+        const initialPower = getRandomFloat(RATIO_EXP_MIN, RATIO_EXP_MAX);
+        const targetPower = getRandomFloat(RATIO_EXP_MIN, RATIO_EXP_MAX);
+
+        particles.push({
+            x: getRandomInt(0, width - 1),
+            y: getRandomInt(0, height - 1),
+            vx: getRandomFloat(DRIFT_SPEED_MIN, DRIFT_SPEED_MAX) * (Math.random() < 0.5 ? 1 : -1),
+            vy: getRandomFloat(DRIFT_SPEED_MIN, DRIFT_SPEED_MAX) * (Math.random() < 0.5 ? 1 : -1),
+            currentRatioPower: initialPower,
+            targetRatioPower: targetPower,
+            area: targetArea
+        });
+    }
+
+    return particles;
+};
+
+const updateAndDrawParticles = (ctx, width, height, pixels, particles) => {
+    // Clear with background color
+    ctx.fillStyle = MAIN_BG_COLOR;
+    ctx.fillRect(0, 0, width, height);
+
+    for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+
+        // 1. Morph Ratio smoothly towards target ratio (Shape-Shifter)
+        p.currentRatioPower = lerp(p.currentRatioPower, p.targetRatioPower, MORPH_SPEED);
+        
+        // If close to target, pick a new random target ratio
+        if (Math.abs(p.targetRatioPower - p.currentRatioPower) < 0.05) {
+            p.targetRatioPower = getRandomFloat(RATIO_EXP_MIN, RATIO_EXP_MAX);
+        }
+
+        // 2. Float / Drift position (Floating Mosaic)
+        p.x += p.vx;
+        p.y += p.vy;
+
+        // Wrap around screen bounds seamlessly
+        if (p.x < 0) p.x += width;
+        if (p.x >= width) p.x -= width;
+        if (p.y < 0) p.y += height;
+        if (p.y >= height) p.y -= height;
+
+        // 3. Calculate dimensions based on constant area
+        const ratio = Math.pow(BASE_TEN, p.currentRatioPower);
+        const rectWidth = Math.sqrt(p.area * ratio);
+        const rectHeight = Math.sqrt(p.area / ratio);
+
+        // 4. Sample color dynamically from the hidden offscreen sunset based on current center
+        const sampleX = Math.floor(p.x);
+        const sampleY = Math.floor(p.y);
+        const pixelIndex = (sampleY * width + sampleX) * NUM_CHANNELS;
+
+        const r = pixels[pixelIndex];
+        const g = pixels[pixelIndex + 1];
+        const b = pixels[pixelIndex + 2];
+
+        // 5. Draw the rectangle
+        const drawX = p.x - (rectWidth * MATH_HALF);
+        const drawY = p.y - (rectHeight * MATH_HALF);
+
+        ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
+        ctx.fillRect(drawX, drawY, rectWidth, rectHeight);
+    }
+};
+
+const generateAnimatedSunset = () => {
     const canvas = document.getElementById(CANVAS_ID);
     const ctx = canvas.getContext(CTX_TYPE);
     
@@ -272,41 +332,20 @@ const generateAlgorithmicSunset = () => {
     canvas.width = width;
     canvas.height = height;
 
-    // Step 1: Generate rich, mirrored landscape in memory
+    // Generate rich, mirrored landscape off-screen
     const sunsetData = createOffscreenSunset(width, height);
     const pixels = sunsetData.data;
 
-    // Step 2: Fill canvas with requested background color
-    ctx.fillStyle = MAIN_BG_COLOR;
-    ctx.fillRect(0, 0, width, height);
-
     const targetArea = (width * height) * AREA_FRACTION;
+    const particles = initCubistParticles(width, height, targetArea);
 
-    // Step 5: Scatter N rectangles
-    for (let i = 0; i < RECTANGLE_COUNT; i++) {
-        // Step 3: Randomly choose a pixel
-        const px = getRandomInt(0, width - 1);
-        const py = getRandomInt(0, height - 1);
+    // Animation Loop using requestAnimationFrame
+    const animate = () => {
+        updateAndDrawParticles(ctx, width, height, pixels, particles);
+        requestAnimationFrame(animate);
+    };
 
-        const pixelIndex = (py * width + px) * NUM_CHANNELS;
-        const r = pixels[pixelIndex];
-        const g = pixels[pixelIndex + 1];
-        const b = pixels[pixelIndex + 2];
-        
-        // Step 6: Constant area, wild ratios
-        const ratioPower = getRandomFloat(RATIO_EXP_MIN, RATIO_EXP_MAX);
-        const ratio = Math.pow(BASE_TEN, ratioPower);
-        
-        const rectWidth = Math.sqrt(targetArea * ratio);
-        const rectHeight = Math.sqrt(targetArea / ratio);
-
-        // Step 4: Place rectangle centered on pixel's coordinates
-        const drawX = px - (rectWidth * MATH_HALF);
-        const drawY = py - (rectHeight * MATH_HALF);
-
-        ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
-        ctx.fillRect(drawX, drawY, rectWidth, rectHeight);
-    }
+    requestAnimationFrame(animate);
 };
 
 // ==========================================
@@ -314,5 +353,5 @@ const generateAlgorithmicSunset = () => {
 // ==========================================
 
 window.onload = () => {
-    generateAlgorithmicSunset();
+    generateAnimatedSunset();
 };
