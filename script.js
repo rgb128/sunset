@@ -71,6 +71,15 @@ let serverTimeOffsetMs = 0;
 let dailyMasterSeed = 133799; // Fallback seed
 const UNIVERSAL_RECTANGLE_SEED = 999999; // Always identical for everyone worldwide
 
+// Export / Download Constants
+const BTN_COPY_BACK_ID = 'copy-back-btn';
+const BTN_DOWNLOAD_BACK_ID = 'download-back-btn';
+const BTN_COPY_FRONT_ID = 'copy-front-btn';
+const BTN_DOWNLOAD_FRONT_ID = 'download-front-btn';
+const BUTTON_FEEDBACK_DELAY_MS = 2000;
+const EXPORT_FILENAME_PREFIX = 'rgb128-sunset-';
+const PNG_MIME_TYPE = 'image/png';
+
 // ==========================================
 // SEEDED PRNG (Mulberry32)
 // ==========================================
@@ -418,7 +427,6 @@ const generateAnimatedSunset = async (isManualClick = false) => {
 
     const animate = () => {
         const syncTimeMs = getSynchronizedTimeMs();
-        // const syncTimeMs = isManualClick ? performance.now() : getSynchronizedTimeMs();
         updateAndDrawParticles(ctx, CANVAS_BASE_WIDTH, CANVAS_BASE_HEIGHT, pixels, particles, syncTimeMs);
         currentAnimationId = requestAnimationFrame(animate);
     };
@@ -426,6 +434,123 @@ const generateAnimatedSunset = async (isManualClick = false) => {
     currentAnimationId = requestAnimationFrame(animate);
     isRegenerating = false;
 };
+
+// Helper to capture ONLY what the user currently sees on screen from a source canvas
+const getVisibleScreenCanvas = (sourceCanvas) => {
+    const exportCanvas = document.createElement('canvas');
+    const screenWidth = window.innerWidth;
+    const screenHeight = window.innerHeight;
+    
+    exportCanvas.width = screenWidth;
+    exportCanvas.height = screenHeight;
+    const exportCtx = exportCanvas.getContext('2d');
+
+    // Calculate how the canvas is fitted to the screen (cover height scaling)
+    const scale = screenHeight / CANVAS_BASE_HEIGHT;
+    const scaledWidth = CANVAS_BASE_WIDTH * scale;
+    const scaledHeight = CANVAS_BASE_HEIGHT * scale;
+    const offsetX = (screenWidth - scaledWidth) * MATH_HALF;
+    const offsetY = 0; // Pinned to top/bottom
+
+    // Draw only the portion overlapping the viewport
+    exportCtx.drawImage(
+        sourceCanvas, 
+        0, 0, CANVAS_BASE_WIDTH, CANVAS_BASE_HEIGHT,
+        offsetX, offsetY, scaledWidth, scaledHeight
+    );
+
+    return exportCanvas;
+};
+
+const triggerDownload = (targetCanvas, filename) => {
+    targetCanvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }, PNG_MIME_TYPE);
+};
+
+const handleCopyAction = (targetCanvas, btnElement, defaultText) => {
+    btnElement.innerText = 'copying';
+
+    const blobPromise = new Promise((resolve) => {
+        targetCanvas.toBlob((blob) => {
+            resolve(blob);
+        }, PNG_MIME_TYPE);
+    });
+
+    navigator.clipboard.write([
+        new ClipboardItem({
+            [PNG_MIME_TYPE]: blobPromise
+        })
+    ]).then(() => {
+        btnElement.innerText = 'copied';
+    }).catch((ex) => {
+        console.error(ex);
+        btnElement.innerText = 'failed';
+    }).finally(() => {
+        setTimeout(() => {
+            btnElement.innerText = defaultText;
+        }, BUTTON_FEEDBACK_DELAY_MS);
+    });
+};
+
+const setupExportButtons = () => {
+    const copyBackBtn = document.getElementById(BTN_COPY_BACK_ID);
+    const downloadBackBtn = document.getElementById(BTN_DOWNLOAD_BACK_ID);
+    const copyFrontBtn = document.getElementById(BTN_COPY_FRONT_ID);
+    const downloadFrontBtn = document.getElementById(BTN_DOWNLOAD_FRONT_ID);
+
+    const getBackCanvas = () => {
+        const offCanvas = document.createElement('canvas');
+        offCanvas.width = CANVAS_BASE_WIDTH;
+        offCanvas.height = CANVAS_BASE_HEIGHT;
+        const offCtx = offCanvas.getContext(CTX_TYPE);
+        drawLandscape(offCtx, CANVAS_BASE_WIDTH, CANVAS_BASE_HEIGHT, dailyMasterSeed);
+        drawHorizonSilhouette(offCtx, CANVAS_BASE_WIDTH, CANVAS_BASE_HEIGHT, dailyMasterSeed);
+        return getVisibleScreenCanvas(offCanvas);
+    };
+
+    const getFrontCanvas = () => {
+        const mainCanvas = document.getElementById(CANVAS_ID);
+        return getVisibleScreenCanvas(mainCanvas);
+    };
+
+    if (downloadBackBtn) {
+        downloadBackBtn.onclick = () => {
+            const canvas = getBackCanvas();
+            triggerDownload(canvas, EXPORT_FILENAME_PREFIX + 'back.png');
+        };
+    }
+
+    if (downloadFrontBtn) {
+        downloadFrontBtn.onclick = () => {
+            const canvas = getFrontCanvas();
+            triggerDownload(canvas, EXPORT_FILENAME_PREFIX + 'front.png');
+        };
+    }
+
+    if (copyBackBtn) {
+        copyBackBtn.onclick = () => {
+            const canvas = getBackCanvas();
+            handleCopyAction(canvas, copyBackBtn, 'copy back');
+        };
+    }
+
+    if (copyFrontBtn) {
+        copyFrontBtn.onclick = () => {
+            const canvas = getFrontCanvas();
+            handleCopyAction(canvas, copyFrontBtn, 'copy front');
+        };
+    }
+};
+
+
 
 // ==========================================
 // INITIALIZATION
@@ -436,11 +561,11 @@ window.onload = async () => {
     
     canvas.addEventListener('click', () => {
         if (!isRegenerating) {
-            generateAnimatedSunset(true); // true triggers local random mode on click
+            generateAnimatedSunset(true);
         }
     });
     
-    await generateAnimatedSunset(false); // false triggers daily synchronized mode on load
+    await generateAnimatedSunset();
     
     requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -452,55 +577,6 @@ window.onload = async () => {
         updateCanvasHeightCoverScaling(canvas);
     });
 
+    setupExportButtons();
     startBackgroundTimeResync();
-};
-
-// ==========================================
-// DEBUGGING FUNCTION (Fullscreen Toggle)
-// ==========================================
-
-const toggleDebugOriginalSunset = (enable) => {
-    const CANVAS_DOM_ID = 'main-canvas';
-    const DEBUG_ELEMENT_ID = 'debug-original-sunset-view';
-    const canvas = document.getElementById(CANVAS_DOM_ID);
-    
-    if (!canvas) {
-        return;
-    }
-
-    let debugCanvas = document.getElementById(DEBUG_ELEMENT_ID);
-
-    if (enable) {
-        if (!debugCanvas) {
-            const width = CANVAS_BASE_WIDTH;
-            const height = CANVAS_BASE_HEIGHT;
-            
-            const sunsetImageData = createOffscreenSunset(width, height, dailyMasterSeed);
-            
-            debugCanvas = document.createElement('canvas');
-            debugCanvas.id = DEBUG_ELEMENT_ID;
-            debugCanvas.width = width;
-            debugCanvas.height = height;
-            
-            debugCanvas.style.position = 'fixed';
-            debugCanvas.style.top = '0px';
-            debugCanvas.style.left = '0px';
-            debugCanvas.style.width = '100vw';
-            debugCanvas.style.height = '100vh';
-            debugCanvas.style.zIndex = '99999';
-            debugCanvas.style.display = 'block';
-            debugCanvas.style.objectFit = 'cover';
-            
-            const debugCtx = debugCanvas.getContext('2d');
-            debugCtx.putImageData(sunsetImageData, 0, 0);
-            
-            document.body.appendChild(debugCanvas);
-        } else {
-            debugCanvas.style.display = 'block';
-        }
-    } else {
-        if (debugCanvas) {
-            debugCanvas.style.display = 'none';
-        }
-    }
 };
