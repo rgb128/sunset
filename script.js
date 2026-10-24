@@ -363,6 +363,12 @@ const setupResizeHandler = () => {
 window.onload = () => {
     const canvas = document.getElementById(CANVAS_ID);
     
+    canvas.addEventListener('click', () => {
+        if (!isRegenerating) {
+            generateAnimatedSunset();
+        }
+    });
+    
     // Build canvas immediately while hidden via its default HTML class (is-faded)
     generateAnimatedSunset();
     
