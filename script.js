@@ -7,16 +7,16 @@
 // System
 const CANVAS_ID = 'main-canvas';
 const CTX_TYPE = '2d';
-const NUM_CHANNELS = 4; // R, G, B, A
+const NUM_CHANNELS = 4;
 const MATH_HALF = 0.5;
 const BASE_TEN = 10;
 
-// Algorithm Configuration
-const RECTANGLE_COUNT = 18000;     // Increased to densely pack the canvas
-const AREA_FRACTION = 0.01;      // Area of each rect relative to screen size
+// Algorithm Configuration (User Requested)
+const RECTANGLE_COUNT = 18000;
+const AREA_FRACTION = 0.01;
 const MAIN_BG_COLOR = '#808080';
 
-// Ratio Math (Logarithmic scale for ratios so we get equal amounts of tall vs wide)
+// Ratio Math (Logarithmic scale for ratios)
 const RATIO_EXP_MIN = -1.6;
 const RATIO_EXP_MAX = 1.6;
 
@@ -27,29 +27,36 @@ const NOISE_OCTAVES = 5;
 const NOISE_PERSISTENCE = 0.5;
 const NOISE_LACUNARITY = 2.0;
 
-// Cloud Shape / Warping Configuration
+// Cloud & Water Shape Configuration
 const SCALE_X = 0.0015;
 const SCALE_Y = 0.005;
 const WARP_STRENGTH_X = 2.0;
 const WARP_STRENGTH_Y = 1.0;
 const WARP_OFFSET = 5.2;
 
-// Palette
+// Landscape Configuration
+const HORIZON_RATIO = 0.52;        // Horizon line just below the middle
+const WATER_RIPPLE_SCALE = 1.8;    // Stretches noise horizontally in the water
+const WATER_DARKEN_FACTOR = 0.85;  // Makes the reflection slightly deeper than the sky
+
+// Rich Sunset Palette (Based on Reference Photo)
+// Sky top (Deep Blue) down to Horizon (Pale Yellow)
 const PALETTE = [
-    { r: 40,  g: 30,  b: 60  }, // Deep Purplish Cloud
-    { r: 120, g: 25,  b: 35  }, // Dark Crimson
-    { r: 230, g: 45,  b: 20  }, // Vibrant Red
-    { r: 255, g: 110, b: 0   }, // Intense Orange
-    { r: 255, g: 180, b: 30  }, // Yellow-Orange Horizon
-    { r: 255, g: 240, b: 150 }  // Pale Yellow/White Core
+    { r: 25,  g: 30,  b: 95  }, // Deep Blue
+    { r: 100, g: 30,  b: 110 }, // Purple / Violet
+    { r: 210, g: 45,  b: 115 }, // Vibrant Hot Pink / Magenta
+    { r: 220, g: 50,  b: 40  }, // Crimson Red
+    { r: 255, g: 100, b: 10  }, // Vivid Orange
+    { r: 255, g: 190, b: 0   }, // Bright Golden Yellow
+    { r: 255, g: 240, b: 170 }  // Pale Yellow Glow at horizon
 ];
 const PALETTE_OFFSET = 1;
 const RGB_ALPHA_OPAQUE = 255;
-const PIXEL_DATA_STEP = 4; // RGBA
+const PIXEL_DATA_STEP = 4;
 
-// Mountain / Silhouette
-const SILHOUETTE_COLOR = '#080510';
-const SILHOUETTE_HEIGHT_RATIO = 0.08;
+// Horizon Silhouette (Islands/Trees)
+const SILHOUETTE_COLOR = '#050308';
+const SILHOUETTE_HEIGHT_RATIO = 0.05;
 const SILHOUETTE_OCTAVES = 4;
 const MOUNTAIN_STEP = 2;
 
@@ -145,19 +152,29 @@ const getColorForValue = (value) => {
 // OFFSCREEN SUNSET GENERATION
 // ==========================================
 
-const drawSky = (ctx, width, height) => {
+const drawLandscape = (ctx, width, height) => {
     const imageData = ctx.createImageData(width, height);
     const data = imageData.data;
     
     const offsetX = Math.random() * 1000;
     const offsetY = Math.random() * 1000;
+    const horizonY = height * HORIZON_RATIO;
     
     for (let y = 0; y < height; y++) {
-        const normalizedY = y / height;
+        const isWater = y > horizonY;
+        
+        // Mirror the Y coordinate if we are below the horizon
+        const mappedY = isWater ? horizonY - (y - horizonY) : y;
+        
+        // 0.0 at top of sky, 1.0 at horizon line
+        const normalizedY = mappedY / horizonY; 
         
         for (let x = 0; x < width; x++) {
-            const nx = (x + offsetX) * SCALE_X;
-            const ny = (y + offsetY) * SCALE_Y;
+            // Stretch the horizontal noise slightly more in the water to simulate perspective/ripples
+            const waterStretch = isWater ? WATER_RIPPLE_SCALE : 1.0;
+            
+            const nx = (x + offsetX) * SCALE_X * waterStretch;
+            const ny = (mappedY + offsetY) * SCALE_Y;
             
             const warp1 = fbm(nx, ny, NOISE_OCTAVES);
             const warp2 = fbm(nx + WARP_OFFSET, ny + WARP_OFFSET, NOISE_OCTAVES);
@@ -167,8 +184,13 @@ const drawSky = (ctx, width, height) => {
             
             const noiseVal = fbm(distortedX, distortedY, NOISE_OCTAVES);
             
-            const elevationFactor = Math.pow(normalizedY, 1.5);
-            const finalValue = (noiseVal * 0.6) + (elevationFactor * 0.5);
+            // Push colors harder towards the bottom (horizon)
+            const elevationFactor = Math.pow(normalizedY, 1.3);
+            let finalValue = (noiseVal * 0.5) + (elevationFactor * 0.65);
+            
+            if (isWater) {
+                finalValue *= WATER_DARKEN_FACTOR; // Water is slightly darker than sky
+            }
             
             const color = getColorForValue(finalValue);
             
@@ -183,26 +205,43 @@ const drawSky = (ctx, width, height) => {
     ctx.putImageData(imageData, 0, 0);
 };
 
-const drawSilhouette = (ctx, width, height) => {
-    const maxMountainHeight = height * SILHOUETTE_HEIGHT_RATIO;
+const drawHorizonSilhouette = (ctx, width, height) => {
+    const horizonY = height * HORIZON_RATIO;
+    const maxIslandHeight = height * SILHOUETTE_HEIGHT_RATIO;
     const mountainSeed = Math.random() * 1000;
     
     ctx.beginPath();
-    ctx.moveTo(0, height);
+    // Start at the left edge, on the horizon
+    ctx.moveTo(0, horizonY);
     
+    // Draw the jagged top edge of the islands/trees
     for (let x = 0; x <= width; x += MOUNTAIN_STEP) {
-        const nx = x * 0.005;
+        const nx = x * 0.004;
+        // Use high-frequency noise for a tree-line/island look
         const noiseVal = fbm(nx + mountainSeed, mountainSeed, SILHOUETTE_OCTAVES);
         
-        const yOffset = noiseVal * maxMountainHeight;
-        const yPos = height - yOffset;
+        // Islands sporadically emerge (pow lowers the low values)
+        const islandMask = Math.pow(noiseVal, 2.5); 
+        
+        const yOffset = islandMask * maxIslandHeight;
+        const yPos = horizonY - yOffset;
         
         ctx.lineTo(x, yPos);
     }
     
-    ctx.lineTo(width, height);
-    ctx.closePath();
+    // Draw the reflection (bottom edge of the islands in the water)
+    for (let x = width; x >= 0; x -= MOUNTAIN_STEP) {
+        const nx = x * 0.004;
+        const noiseVal = fbm(nx + mountainSeed, mountainSeed, SILHOUETTE_OCTAVES);
+        
+        const islandMask = Math.pow(noiseVal, 2.5);
+        const yOffset = islandMask * maxIslandHeight * 0.6; // Reflection is a bit shorter
+        const yPos = horizonY + yOffset;
+        
+        ctx.lineTo(x, yPos);
+    }
     
+    ctx.closePath();
     ctx.fillStyle = SILHOUETTE_COLOR;
     ctx.fill();
 };
@@ -213,8 +252,8 @@ const createOffscreenSunset = (width, height) => {
     canvas.height = height;
     const ctx = canvas.getContext(CTX_TYPE);
 
-    drawSky(ctx, width, height);
-    drawSilhouette(ctx, width, height);
+    drawLandscape(ctx, width, height);
+    drawHorizonSilhouette(ctx, width, height);
 
     return ctx.getImageData(0, 0, width, height);
 };
@@ -233,17 +272,17 @@ const generateAlgorithmicSunset = () => {
     canvas.width = width;
     canvas.height = height;
 
-    // Step 1: Generate old-style sunset in memory
+    // Step 1: Generate rich, mirrored landscape in memory
     const sunsetData = createOffscreenSunset(width, height);
     const pixels = sunsetData.data;
 
-    // Step 2: Create black canvas
+    // Step 2: Fill canvas with requested background color
     ctx.fillStyle = MAIN_BG_COLOR;
     ctx.fillRect(0, 0, width, height);
 
     const targetArea = (width * height) * AREA_FRACTION;
 
-    // Step 5: Repeat until N rectangles are drawn
+    // Step 5: Scatter N rectangles
     for (let i = 0; i < RECTANGLE_COUNT; i++) {
         // Step 3: Randomly choose a pixel
         const px = getRandomInt(0, width - 1);
@@ -254,7 +293,7 @@ const generateAlgorithmicSunset = () => {
         const g = pixels[pixelIndex + 1];
         const b = pixels[pixelIndex + 2];
         
-        // Step 6: Constant area, very different ratios
+        // Step 6: Constant area, wild ratios
         const ratioPower = getRandomFloat(RATIO_EXP_MIN, RATIO_EXP_MAX);
         const ratio = Math.pow(BASE_TEN, ratioPower);
         
