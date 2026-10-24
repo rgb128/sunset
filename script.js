@@ -4,9 +4,11 @@
 // CONSTANTS & CONFIGURATION
 // ==========================================
 
-// System
+// System & Virtual Resolution (2000x2000 base)
 const CANVAS_ID = 'main-canvas';
 const CTX_TYPE = '2d';
+const VIRTUAL_WIDTH = 2000;
+const VIRTUAL_HEIGHT = 2000;
 const NUM_CHANNELS = 4;
 const MATH_HALF = 0.5;
 const BASE_TEN = 10;
@@ -17,7 +19,7 @@ const AREA_FRACTION = 0.01;
 const MAIN_BG_COLOR = '#808080';
 
 // Animation & Physics Constants
-const ANIMATION_SPEED_MULTIPLIER = .2;
+const ANIMATION_SPEED_MULTIPLIER = 0.2;
 const DRIFT_SPEED_MIN = 0.2 * ANIMATION_SPEED_MULTIPLIER;
 const DRIFT_SPEED_MAX = 0.8 * ANIMATION_SPEED_MULTIPLIER;
 const MORPH_SPEED = 0.02 * ANIMATION_SPEED_MULTIPLIER;
@@ -39,24 +41,23 @@ const WARP_STRENGTH_Y = 1.0;
 const WARP_OFFSET = 5.2;
 
 // Landscape Configuration
-const HORIZON_RATIO = 0.75; // Horizon lower down to give more room for the sky
+const HORIZON_RATIO = 0.75; 
 
-// Full Sunset Spectrum ending in Black at the bottom
+// Full Sunset Spectrum
 const PALETTE = [
     { r: 20,  g: 15,  b: 50  }, // Deep Night Blue (Top)
     { r: 75,  g: 20,  b: 95  }, // Rich Purple
     { r: 180, g: 30,  b: 90  }, // Magenta / Hot Pink
     { r: 230, g: 45,  b: 25  }, // Red
     { r: 255, g: 110, b: 10  }, // Orange
-    { r: 255, g: 195, b: 20  }, // Yellow-Orange
-    { r: 40,  g: 15,  b: 30  }, // Dark Shadowy Transition
+    { r: 255, g: 195, b: 20  }  // Yellow-Orange
 ];
 const PALETTE_OFFSET = 1;
 const RGB_ALPHA_OPAQUE = 255;
 const PIXEL_DATA_STEP = 4;
 
 // Horizon Silhouette
-const SILHOUETTE_COLOR = '#030205';
+const SILHOUETTE_COLOR = 'black';
 const SILHOUETTE_HEIGHT_RATIO = 0.15;
 const SILHOUETTE_OCTAVES = 4;
 const MOUNTAIN_STEP = 2;
@@ -175,7 +176,6 @@ const drawLandscape = (ctx, width, height) => {
             
             const noiseVal = fbm(distortedX, distortedY, NOISE_OCTAVES);
             
-            // Clean gradient mix without black bleeding in
             const finalValue = (noiseVal * 0.4) + (normalizedY * 0.6);
             
             const color = getColorForValue(finalValue);
@@ -293,24 +293,54 @@ const updateAndDrawParticles = (ctx, width, height, pixels, particles) => {
     }
 };
 
+// Handles resizing and scaling canvas to match background-size: cover behavior (bottom-center anchored)
+// Handles resizing and scaling canvas to match background-size: cover behavior (always pinned to bottom-center)
+const updateCanvasCoverScaling = (canvas) => {
+    const viewport = canvas.parentElement;
+    const viewportWidth = viewport.clientWidth;
+    const viewportHeight = viewport.clientHeight;
+
+    const viewportAspect = viewportWidth / viewportHeight;
+    const canvasAspect = VIRTUAL_WIDTH / VIRTUAL_HEIGHT;
+
+    let scale = 1;
+    if (viewportAspect > canvasAspect) {
+        scale = viewportWidth / VIRTUAL_WIDTH;
+    } else {
+        scale = viewportHeight / VIRTUAL_HEIGHT;
+    }
+
+    const scaledWidth = VIRTUAL_WIDTH * scale;
+    const scaledHeight = VIRTUAL_HEIGHT * scale;
+
+    canvas.style.width = scaledWidth + 'px';
+    canvas.style.height = scaledHeight + 'px';
+    canvas.style.left = ((viewportWidth - scaledWidth) * MATH_HALF) + 'px';
+    
+    // Always align the bottom of the canvas to the bottom of the viewport
+    canvas.style.top = (viewportHeight - scaledHeight) + 'px';
+};
+
 const generateAnimatedSunset = () => {
     const canvas = document.getElementById(CANVAS_ID);
     const ctx = canvas.getContext(CTX_TYPE);
-    
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    
-    canvas.width = width;
-    canvas.height = height;
 
-    const sunsetData = createOffscreenSunset(width, height);
+    canvas.width = VIRTUAL_WIDTH;
+    canvas.height = VIRTUAL_HEIGHT;
+
+    updateCanvasCoverScaling(canvas);
+    window.addEventListener('resize', () => {
+        updateCanvasCoverScaling(canvas);
+    });
+
+    const sunsetData = createOffscreenSunset(VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
     const pixels = sunsetData.data;
 
-    const targetArea = (width * height) * AREA_FRACTION;
-    const particles = initCubistParticles(width, height, targetArea);
+    const targetArea = (VIRTUAL_WIDTH * VIRTUAL_HEIGHT) * AREA_FRACTION;
+    const particles = initCubistParticles(VIRTUAL_WIDTH, VIRTUAL_HEIGHT, targetArea);
 
     const animate = () => {
-        updateAndDrawParticles(ctx, width, height, pixels, particles);
+        updateAndDrawParticles(ctx, VIRTUAL_WIDTH, VIRTUAL_HEIGHT, pixels, particles);
         requestAnimationFrame(animate);
     };
 
@@ -323,9 +353,7 @@ const generateAnimatedSunset = () => {
 
 window.onload = () => {
     generateAnimatedSunset();
-    // toggleDebugOriginalSunset(true);
 };
-
 
 // ==========================================
 // DEBUGGING FUNCTION (Fullscreen Toggle)
@@ -344,8 +372,8 @@ const toggleDebugOriginalSunset = (enable) => {
 
     if (enable) {
         if (!debugCanvas) {
-            const width = canvas.width;
-            const height = canvas.height;
+            const width = VIRTUAL_WIDTH;
+            const height = VIRTUAL_HEIGHT;
             
             const sunsetImageData = createOffscreenSunset(width, height);
             
