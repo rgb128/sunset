@@ -49,7 +49,6 @@ const PALETTE = [
     { r: 255, g: 110, b: 10  }, // Orange
     { r: 255, g: 195, b: 20  }, // Yellow-Orange
     { r: 40,  g: 15,  b: 30  }, // Dark Shadowy Transition
-    { r: 5,   g: 3,   b: 8   }  // Deep Black (Bottom)
 ];
 const PALETTE_OFFSET = 1;
 const RGB_ALPHA_OPAQUE = 255;
@@ -159,20 +158,9 @@ const drawLandscape = (ctx, width, height) => {
     
     const offsetX = Math.random() * 1000;
     const offsetY = Math.random() * 1000;
-    const horizonY = height * HORIZON_RATIO;
     
     for (let y = 0; y < height; y++) {
-        // Map vertical space from top (0.0) down to the bottom (1.0)
-        let normalizedY = y / height;
-        
-        // Push the brightest colors (yellow-orange) up near the horizon line
-        if (y <= horizonY) {
-            normalizedY = (y / horizonY) * 0.75; // Skews spectrum into upper section
-        } else {
-            // Below horizon transitions rapidly into deep shadows and black
-            const subHorizonProgress = (y - horizonY) / (height - horizonY);
-            normalizedY = 0.75 + (subHorizonProgress * 0.25);
-        }
+        const normalizedY = y / height;
         
         for (let x = 0; x < width; x++) {
             const nx = (x + offsetX) * SCALE_X;
@@ -186,13 +174,8 @@ const drawLandscape = (ctx, width, height) => {
             
             const noiseVal = fbm(distortedX, distortedY, NOISE_OCTAVES);
             
-            // Combine noise with our color mapping curve
-            let finalValue = (noiseVal * 0.4) + (normalizedY * 0.6);
-            
-            // // Force the bottom 15% of the screen into absolute dark shadows/black
-            // if (y > horizonY + ((height - horizonY) * 0.5)) {
-            //     finalValue = lerp(finalValue, 1.0, 0.8);
-            // }
+            // Clean gradient mix without black bleeding in
+            const finalValue = (noiseVal * 0.4) + (normalizedY * 0.6);
             
             const color = getColorForValue(finalValue);
             
