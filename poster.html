@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>#808080 - poster & favicon playground</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 20px;
+            background-color: #111111;
+            color: #ffffff;
+            font-family: sans-serif;
+        }
+
+        .playground-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 40px;
+            justify-content: center;
+        }
+
+        .tool-box {
+            background-color: #222222;
+            padding: 20px;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
+
+        h2 {
+            margin: 0 0 10px 0;
+            font-size: 18px;
+            text-transform: lowercase;
+            color: #808080;
+        }
+
+        canvas {
+            display: block;
+            border: 2px solid #444444;
+            background-color: #000000;
+        }
+
+        /* Chessboard transparency pattern for favicon workspace */
+        .chess-canvas {
+            background-image: linear-gradient(45deg, #444 25%, transparent 25%), 
+                              linear-gradient(-45deg, #444 25%, transparent 25%), 
+                              linear-gradient(45deg, transparent 75%, #444 75%), 
+                              linear-gradient(-45deg, transparent 75%, #444 75%);
+            background-size: 16px 16px;
+            background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+            background-color: #222;
+        }
+
+        .controls-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            width: 100%;
+            justify-content: space-between;
+        }
+
+        label {
+            font-size: 13px;
+            text-transform: lowercase;
+            color: #aaaaaa;
+        }
+
+        input[type="range"] {
+            width: 150px;
+        }
+
+        .action-btn {
+            background-color: #000000;
+            color: #ffffff;
+            border: 1px solid #555555;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            text-transform: lowercase;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        .action-btn:hover {
+            background-color: #333333;
+        }
+
+        .previews-grid {
+            display: flex;
+            gap: 15px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-top: 10px;
+        }
+
+        .preview-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+            font-size: 11px;
+            color: #808080;
+        }
+    </style>
+</head>
+<body>
+    <div class="playground-container">
+        
+        <!-- POSTER TOOL -->
+        <div class="tool-box">
+            <h2>poster generator (1000x1000)</h2>
+            <canvas id="poster-canvas" width="1000" height="1000"></canvas>
+            
+            <div class="controls-row">
+                <label for="mountain-slider">mountain height:</label>
+                <input id="mountain-slider" type="range" min="0.02" max="0.30" step="0.01" value="0.15" />
+            </div>
+
+            <div class="controls-row">
+                <button id="regen-poster-btn" class="action-btn" type="button">regenerate</button>
+                <button id="download-poster-btn" class="action-btn" type="button">download poster</button>
+            </div>
+        </div>
+
+        <!-- FAVICON TOOL -->
+        <div class="tool-box">
+            <h2>favicon designer (64x64 transparent)</h2>
+            <canvas id="favicon-canvas" class="chess-canvas" width="512" height="512" style="width: 512px; height: 512px;"></canvas>
+            <div style="font-size: 11px; color: #808080; text-transform: lowercase;">
+                tip: click & drag to move. hover & use arrows (w/h) or scroll (scale).
+            </div>
+
+            <div class="controls-row">
+                <button id="download-favicon-btn" class="action-btn" type="button">download 64x64 favicon</button>
+            </div>
+
+            <h2>live previews</h2>
+            <div class="previews-grid">
+                <div class="preview-item">
+                    <canvas id="prev-16" width="16" height="16" class="chess-canvas" style="width: 32px; height: 32px;"></canvas>
+                    <span>16px</span>
+                    <button class="action-btn" style="padding: 2px 6px; font-size: 10px;" onclick="downloadSpecificSize(16)">save</button>
+                </div>
+                <div class="preview-item">
+                    <canvas id="prev-32" width="32" height="32" class="chess-canvas" style="width: 48px; height: 48px;"></canvas>
+                    <span>32px</span>
+                    <button class="action-btn" style="padding: 2px 6px; font-size: 10px;" onclick="downloadSpecificSize(32)">save</button>
+                </div>
+                <div class="preview-item">
+                    <canvas id="prev-64" width="64" height="64" class="chess-canvas" style="width: 64px; height: 64px;"></canvas>
+                    <span>64px</span>
+                    <button class="action-btn" style="padding: 2px 6px; font-size: 10px;" onclick="downloadSpecificSize(64)">save</button>
+                </div>
+                <div class="preview-item">
+                    <canvas id="prev-128" width="128" height="128" class="chess-canvas" style="width: 96px; height: 96px;"></canvas>
+                    <span>128px</span>
+                    <button class="action-btn" style="padding: 2px 6px; font-size: 10px;" onclick="downloadSpecificSize(128)">save</button>
+                </div>
+                <div class="preview-item">
+                    <canvas id="prev-256" width="256" height="256" class="chess-canvas" style="width: 128px; height: 128px;"></canvas>
+                    <span>256px</span>
+                    <button class="action-btn" style="padding: 2px 6px; font-size: 10px;" onclick="downloadSpecificSize(256)">save</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        'use strict';
+
+        // ==========================================
+        // CONSTANTS & CONFIGURATION
+        // ==========================================
+
+        const MATH_HALF = 0.5;
+        const POSTER_WIDTH = 1000;
+        const POSTER_HEIGHT = 1000;
+        const FAVICON_SIZE = 64;
+        
+        const TABLE_SIZE = 256;
+        const TABLE_MASK = 255;
+        const NOISE_OCTAVES = 5;
+        const NOISE_PERSISTENCE = 0.5;
+        const NOISE_LACUNARITY = 2.0;
+
+        const SCALE_X = 0.0015;
+        const SCALE_Y = 0.005;
+        const WARP_STRENGTH_X = 2.0;
+        const WARP_STRENGTH_Y = 1.0;
+        const WARP_OFFSET = 5.2;
+
+        const PALETTE = [
+            { r: 20,  g: 15,  b: 50  },
+            { r: 75,  g: 20,  b: 95  },
+            { r: 180, g: 30,  b: 90  },
+            { r: 230, g: 45,  b: 25  },
+            { r: 255, g: 110, b: 10  },
+            { r: 255, g: 195, b: 20  }
+        ];
+        const PALETTE_OFFSET = 1;
+        const RGB_ALPHA_OPAQUE = 255;
+        const PIXEL_DATA_STEP = 4;
+        const SILHOUETTE_COLOR = '#000000';
+        const SILHOUETTE_OCTAVES = 4;
+        const MOUNTAIN_STEP = 2;
+
+        // Interaction Constants
+        const ARROW_STEP = 1;
+        const WHEEL_SCALE_FACTOR = 1.05;
+        const MIN_RECT_DIM = 2;
+
+        // Runtime Global State
+        let currentPosterSeed = 133799;
+        let faviconRectangles = [];
+        let selectedRectIndex = -1;
+        let isDragging = false;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+
+        // ==========================================
+        // UTILITIES & NOISE GENERATOR
+        // ==========================================
+
+        const getSeededRandom = (seedValue) => {
+            let t = seedValue += 0x6D2B79F5;
+            t = Math.imul(t ^ t >>> 15, t | 1);
+            t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        };
+
+        const getSeededFloat = (seedValue, min, max) => {
+            return getSeededRandom(seedValue) * (max - min) + min;
+        };
+
+        const lerp = (a, b, t) => {
+            return a + (b - a) * t;
+        };
+
+        const smoothstep = (t) => {
+            return t * t * (3 - 2 * t);
+        };
+
+        const noise2D = (x, y, seed) => {
+            const xi = Math.floor(x);
+            const yi = Math.floor(y);
+            const xf = x - xi;
+            const yf = y - yi;
+            
+            const hash = (px, py) => {
+                let s = Math.imul(px, 374761393) + Math.imul(py, 668265261) + Math.imul(seed, 14469);
+                return getSeededRandom(s);
+            };
+
+            const c00 = hash(xi, yi);
+            const c10 = hash(xi + 1, yi);
+            const c01 = hash(xi, yi + 1);
+            const c11 = hash(xi + 1, yi + 1);
+            
+            const sx = smoothstep(xf);
+            const sy = smoothstep(yf);
+            
+            const nx0 = lerp(c00, c10, sx);
+            const nx1 = lerp(c01, c11, sx);
+            
+            return lerp(nx0, nx1, sy);
+        };
+
+        const fbm = (x, y, octaves, seed) => {
+            let total = 0;
+            let amplitude = 1.0;
+            let frequency = 1.0;
+            let maxValue = 0;
+            
+            for (let i = 0; i < octaves; i++) {
+                total += noise2D(x * frequency, y * frequency, seed + i) * amplitude;
+                maxValue += amplitude;
+                amplitude *= NOISE_PERSISTENCE;
+                frequency *= NOISE_LACUNARITY;
+            }
+            
+            return total / maxValue;
+        };
+
+        const getColorForValue = (value) => {
+            const clamped = Math.max(0, Math.min(1, value));
+            const maxIndex = PALETTE.length - PALETTE_OFFSET;
+            const scaledValue = clamped * maxIndex;
+            const index1 = Math.floor(scaledValue);
+            const index2 = Math.min(index1 + PALETTE_OFFSET, maxIndex);
+            const blend = scaledValue - index1;
+            const c1 = PALETTE[index1];
+            const c2 = PALETTE[index2];
+            
+            return {
+                r: lerp(c1.r, c2.r, blend),
+                g: lerp(c1.g, c2.g, blend),
+                b: lerp(c1.b, c2.b, blend)
+            };
+        };
+
+        // ==========================================
+        // POSTER GENERATION LOGIC
+        // ==========================================
+
+        const drawPoster = () => {
+            const canvas = document.getElementById('poster-canvas');
+            const ctx = canvas.getContext('2d');
+            const slider = document.getElementById('mountain-slider');
+            const mountainRatio = parseFloat(slider.value);
+
+            const imageData = ctx.createImageData(POSTER_WIDTH, POSTER_HEIGHT);
+            const data = imageData.data;
+            
+            const offsetX = getSeededFloat(currentPosterSeed + 1, 0, 1000);
+            const offsetY = getSeededFloat(currentPosterSeed + 2, 0, 1000);
+            
+            for (let y = 0; y < POSTER_HEIGHT; y++) {
+                const normalizedY = y / POSTER_HEIGHT;
+                
+                for (let x = 0; x < POSTER_WIDTH; x++) {
+                    const nx = (x + offsetX) * SCALE_X;
+                    const ny = (y + offsetY) * SCALE_Y;
+                    
+                    const warp1 = fbm(nx, ny, NOISE_OCTAVES, currentPosterSeed + 10);
+                    const warp2 = fbm(nx + WARP_OFFSET, ny + WARP_OFFSET, NOISE_OCTAVES, currentPosterSeed + 20);
+                    
+                    const distortedX = nx + (warp1 * WARP_STRENGTH_X);
+                    const distortedY = ny + (warp2 * WARP_STRENGTH_Y);
+                    
+                    const noiseVal = fbm(distortedX, distortedY, NOISE_OCTAVES, currentPosterSeed + 30);
+                    const finalValue = (noiseVal * 0.4) + (normalizedY * 0.6);
+                    
+                    const color = getColorForValue(finalValue);
+                    const pixelIndex = (y * POSTER_WIDTH + x) * PIXEL_DATA_STEP;
+                    
+                    data[pixelIndex] = color.r;
+                    data[pixelIndex + 1] = color.g;
+                    data[pixelIndex + 2] = color.b;
+                    data[pixelIndex + 3] = RGB_ALPHA_OPAQUE;
+                }
+            }
+            
+            ctx.putImageData(imageData, 0, 0);
+
+            // Draw Silhouette
+            const maxMountainHeight = POSTER_HEIGHT * mountainRatio;
+            const mountainSeed = getSeededFloat(currentPosterSeed + 40, 0, 1000);
+            
+            ctx.beginPath();
+            ctx.moveTo(0, POSTER_HEIGHT);
+            
+            for (let x = 0; x <= POSTER_WIDTH; x += MOUNTAIN_STEP) {
+                const nx = x * 0.005;
+                const noiseVal = fbm(nx + mountainSeed, mountainSeed, SILHOUETTE_OCTAVES, currentPosterSeed + 50);
+                const yOffset = noiseVal * maxMountainHeight;
+                const yPos = POSTER_HEIGHT - yOffset;
+                ctx.lineTo(x, yPos);
+            }
+            
+            ctx.lineTo(POSTER_WIDTH, POSTER_HEIGHT);
+            ctx.closePath();
+            ctx.fillStyle = SILHOUETTE_COLOR;
+            ctx.fill();
+        };
+
+        // ==========================================
+        // FAVICON DESIGNER LOGIC
+        // ==========================================
+
+        const initFaviconRectangles = () => {
+            faviconRectangles = [
+                { x: 10, y: 50, w: 44, h: 8, color: '#000000' },
+                { x: 16, y: 15, w: 14, h: 22, color: '#e62d75' },
+                { x: 38, y: 22, w: 16, h: 12, color: '#ff6600' }
+            ];
+        };
+
+        const drawFaviconPlayground = () => {
+            const canvas = document.getElementById('favicon-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            ctx.clearRect(0, 0, FAVICON_SIZE, FAVICON_SIZE);
+
+            for (let i = 0; i < faviconRectangles.length; i++) {
+                const rect = faviconRectangles[i];
+                ctx.fillStyle = rect.color;
+                ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+
+                if (i === selectedRectIndex) {
+                    ctx.strokeStyle = '#00ffff';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(rect.x - 0.5, rect.y - 0.5, rect.w + 1, rect.h + 1);
+                }
+            }
+
+            updatePreviews();
+        };
+
+        const updatePreviews = () => {
+            const sourceCanvas = document.getElementById('favicon-canvas');
+            const sizes = [16, 32, 64, 128, 256];
+
+            sizes.forEach((sz) => {
+                const prevCanvas = document.getElementById('prev-' + sz);
+                if (!prevCanvas) return;
+                const prevCtx = prevCanvas.getContext('2d');
+                prevCtx.clearRect(0, 0, sz, sz);
+                prevCtx.imageSmoothingEnabled = false; // Keeps pixel art / retro shapes crisp
+                prevCtx.drawImage(sourceCanvas, 0, 0, FAVICON_SIZE, FAVICON_SIZE, 0, 0, sz, sz);
+            });
+        };
+
+        const downloadSpecificSize = (targetSize) => {
+            const sourceCanvas = document.getElementById('favicon-canvas');
+            const exportCanvas = document.createElement('canvas');
+            exportCanvas.width = targetSize;
+            exportCanvas.height = targetSize;
+            const exportCtx = exportCanvas.getContext('2d');
+            
+            exportCtx.imageSmoothingEnabled = false;
+            exportCtx.drawImage(sourceCanvas, 0, 0, FAVICON_SIZE, FAVICON_SIZE, 0, 0, targetSize, targetSize);
+            
+            const link = document.createElement('a');
+            link.download = 'favicon-' + targetSize + 'x' + targetSize + '.png';
+            link.href = exportCanvas.toDataURL('image/png');
+            link.click();
+        };
+
+        // ==========================================
+        // MOUSE & KEYBOARD INTERACTION HANDLERS
+        // ==========================================
+
+        const getMousePos = (canvas, evt) => {
+            const rect = canvas.getBoundingClientRect();
+            const scale = FAVICON_SIZE / canvas.clientWidth;
+            return {
+                x: (evt.clientX - rect.left) * scale,
+                y: (evt.clientY - rect.top) * scale
+            };
+        };
+
+        const setupFaviconInteractions = () => {
+            const canvas = document.getElementById('favicon-canvas');
+
+            canvas.addEventListener('mousedown', (e) => {
+                const pos = getMousePos(canvas, e);
+                selectedRectIndex = -1;
+
+                for (let i = faviconRectangles.length - 1; i >= 0; i--) {
+                    const r = faviconRectangles[i];
+                    if (pos.x >= r.x && pos.x <= r.x + r.w && pos.y >= r.y && pos.y <= r.y + r.h) {
+                        selectedRectIndex = i;
+                        isDragging = true;
+                        dragOffsetX = pos.x - r.x;
+                        dragOffsetY = pos.y - r.y;
+                        break;
+                    }
+                }
+                drawFaviconPlayground();
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (!isDragging || selectedRectIndex === -1) return;
+                const pos = getMousePos(canvas, e);
+                const r = faviconRectangles[selectedRectIndex];
+                r.x = pos.x - dragOffsetX;
+                r.y = pos.y - dragOffsetY;
+                drawFaviconPlayground();
+            });
+
+            window.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+
+            canvas.addEventListener('wheel', (e) => {
+                const pos = getMousePos(canvas, e);
+                for (let i = faviconRectangles.length - 1; i >= 0; i--) {
+                    const r = faviconRectangles[i];
+                    if (pos.x >= r.x && pos.x <= r.x + r.w && pos.y >= r.y && pos.y <= r.y + r.h) {
+                        e.preventDefault();
+                        const isZoomIn = e.deltaY < 0;
+                        const factor = isZoomIn ? WHEEL_SCALE_FACTOR : (1 / WHEEL_SCALE_FACTOR);
+                        
+                        const newW = Math.max(MIN_RECT_DIM, r.w * factor);
+                        const newH = Math.max(MIN_RECT_DIM, r.h * factor);
+                        
+                        r.x += (r.w - newW) * MATH_HALF;
+                        r.y += (r.h - newH) * MATH_HALF;
+                        r.w = newW;
+                        r.h = newH;
+
+                        drawFaviconPlayground();
+                        break;
+                    }
+                }
+            }, { passive: false });
+
+            window.addEventListener('keydown', (e) => {
+                if (selectedRectIndex === -1) return;
+                const r = faviconRectangles[selectedRectIndex];
+                let handled = false;
+
+                if (e.key === 'ArrowRight') {
+                    r.w = Math.max(MIN_RECT_DIM, r.w + ARROW_STEP);
+                    handled = true;
+                } else if (e.key === 'ArrowLeft') {
+                    r.w = Math.max(MIN_RECT_DIM, r.w - ARROW_STEP);
+                    handled = true;
+                } else if (e.key === 'ArrowDown') {
+                    r.h = Math.max(MIN_RECT_DIM, r.h + ARROW_STEP);
+                    handled = true;
+                } else if (e.key === 'ArrowUp') {
+                    r.h = Math.max(MIN_RECT_DIM, r.h - ARROW_STEP);
+                    handled = true;
+                }
+
+                if (handled) {
+                    e.preventDefault();
+                    drawFaviconPlayground();
+                }
+            });
+        };
+
+        // ==========================================
+        // INITIALIZATION & UI BINDINGS
+        // ==========================================
+
+        window.onload = () => {
+            drawPoster();
+
+            document.getElementById('regen-poster-btn').onclick = () => {
+                currentPosterSeed = Math.floor(Math.random() * 100000000);
+                drawPoster();
+            };
+
+            document.getElementById('mountain-slider').oninput = () => {
+                drawPoster();
+            };
+
+            document.getElementById('download-poster-btn').onclick = () => {
+                const posterCanvas = document.getElementById('poster-canvas');
+                const link = document.createElement('a');
+                link.download = 'rgb128-sunset-poster.png';
+                link.href = posterCanvas.toDataURL('image/png');
+                link.click();
+            };
+
+            initFaviconRectangles();
+            drawFaviconPlayground();
+            setupFaviconInteractions();
+
+            document.getElementById('download-favicon-btn').onclick = () => {
+                downloadSpecificSize(FAVICON_SIZE);
+            };
+        };
+    </script>
+</body>
+</html>
