@@ -12,14 +12,14 @@ const MATH_HALF = 0.5;
 const BASE_TEN = 10;
 
 // Algorithm Configuration
-const RECTANGLE_COUNT = 4000;      // Lowered slightly to ensure buttery 60 FPS animation
+const RECTANGLE_COUNT = 4000;
 const AREA_FRACTION = 0.01;
 const MAIN_BG_COLOR = '#808080';
 
 // Animation & Physics Constants
 const DRIFT_SPEED_MIN = 0.2;
 const DRIFT_SPEED_MAX = 0.8;
-const MORPH_SPEED = 0.02;          // Speed at which aspect ratios smoothly morph
+const MORPH_SPEED = 0.02;
 const RATIO_EXP_MIN = -1.6;
 const RATIO_EXP_MAX = 1.6;
 
@@ -30,7 +30,7 @@ const NOISE_OCTAVES = 5;
 const NOISE_PERSISTENCE = 0.5;
 const NOISE_LACUNARITY = 2.0;
 
-// Cloud & Water Shape Configuration
+// Cloud Shape Configuration
 const SCALE_X = 0.0015;
 const SCALE_Y = 0.005;
 const WARP_STRENGTH_X = 2.0;
@@ -38,27 +38,26 @@ const WARP_STRENGTH_Y = 1.0;
 const WARP_OFFSET = 5.2;
 
 // Landscape Configuration
-const HORIZON_RATIO = 0.52;
-const WATER_RIPPLE_SCALE = 1.8;
-const WATER_DARKEN_FACTOR = 0.85;
+const HORIZON_RATIO = 0.75; // Horizon lower down to give more room for the sky
 
-// Rich Sunset Palette
+// Full Sunset Spectrum ending in Black at the bottom
 const PALETTE = [
-    { r: 25,  g: 30,  b: 95  }, // Deep Blue
-    { r: 100, g: 30,  b: 110 }, // Purple / Violet
-    { r: 210, g: 45,  b: 115 }, // Vibrant Hot Pink / Magenta
-    { r: 220, g: 50,  b: 40  }, // Crimson Red
-    { r: 255, g: 100, b: 10  }, // Vivid Orange
-    { r: 255, g: 190, b: 0   }, // Bright Golden Yellow
-    { r: 255, g: 240, b: 170 }  // Pale Yellow Glow at horizon
+    { r: 20,  g: 15,  b: 50  }, // Deep Night Blue (Top)
+    { r: 75,  g: 20,  b: 95  }, // Rich Purple
+    { r: 180, g: 30,  b: 90  }, // Magenta / Hot Pink
+    { r: 230, g: 45,  b: 25  }, // Red
+    { r: 255, g: 110, b: 10  }, // Orange
+    { r: 255, g: 195, b: 20  }, // Yellow-Orange
+    { r: 40,  g: 15,  b: 30  }, // Dark Shadowy Transition
+    { r: 5,   g: 3,   b: 8   }  // Deep Black (Bottom)
 ];
 const PALETTE_OFFSET = 1;
 const RGB_ALPHA_OPAQUE = 255;
 const PIXEL_DATA_STEP = 4;
 
 // Horizon Silhouette
-const SILHOUETTE_COLOR = '#050308';
-const SILHOUETTE_HEIGHT_RATIO = 0.05;
+const SILHOUETTE_COLOR = '#030205';
+const SILHOUETTE_HEIGHT_RATIO = 0.15;
 const SILHOUETTE_OCTAVES = 4;
 const MOUNTAIN_STEP = 2;
 
@@ -163,15 +162,21 @@ const drawLandscape = (ctx, width, height) => {
     const horizonY = height * HORIZON_RATIO;
     
     for (let y = 0; y < height; y++) {
-        const isWater = y > horizonY;
-        const mappedY = isWater ? horizonY - (y - horizonY) : y;
-        const normalizedY = mappedY / horizonY; 
+        // Map vertical space from top (0.0) down to the bottom (1.0)
+        let normalizedY = y / height;
+        
+        // Push the brightest colors (yellow-orange) up near the horizon line
+        if (y <= horizonY) {
+            normalizedY = (y / horizonY) * 0.75; // Skews spectrum into upper section
+        } else {
+            // Below horizon transitions rapidly into deep shadows and black
+            const subHorizonProgress = (y - horizonY) / (height - horizonY);
+            normalizedY = 0.75 + (subHorizonProgress * 0.25);
+        }
         
         for (let x = 0; x < width; x++) {
-            const waterStretch = isWater ? WATER_RIPPLE_SCALE : 1.0;
-            
-            const nx = (x + offsetX) * SCALE_X * waterStretch;
-            const ny = (mappedY + offsetY) * SCALE_Y;
+            const nx = (x + offsetX) * SCALE_X;
+            const ny = (y + offsetY) * SCALE_Y;
             
             const warp1 = fbm(nx, ny, NOISE_OCTAVES);
             const warp2 = fbm(nx + WARP_OFFSET, ny + WARP_OFFSET, NOISE_OCTAVES);
@@ -181,12 +186,13 @@ const drawLandscape = (ctx, width, height) => {
             
             const noiseVal = fbm(distortedX, distortedY, NOISE_OCTAVES);
             
-            const elevationFactor = Math.pow(normalizedY, 1.3);
-            let finalValue = (noiseVal * 0.5) + (elevationFactor * 0.65);
+            // Combine noise with our color mapping curve
+            let finalValue = (noiseVal * 0.4) + (normalizedY * 0.6);
             
-            if (isWater) {
-                finalValue *= WATER_DARKEN_FACTOR;
-            }
+            // // Force the bottom 15% of the screen into absolute dark shadows/black
+            // if (y > horizonY + ((height - horizonY) * 0.5)) {
+            //     finalValue = lerp(finalValue, 1.0, 0.8);
+            // }
             
             const color = getColorForValue(finalValue);
             
@@ -202,36 +208,25 @@ const drawLandscape = (ctx, width, height) => {
 };
 
 const drawHorizonSilhouette = (ctx, width, height) => {
-    const horizonY = height * HORIZON_RATIO;
-    const maxIslandHeight = height * SILHOUETTE_HEIGHT_RATIO;
+    const maxMountainHeight = height * SILHOUETTE_HEIGHT_RATIO;
     const mountainSeed = Math.random() * 1000;
     
     ctx.beginPath();
-    ctx.moveTo(0, horizonY);
+    ctx.moveTo(0, height);
     
     for (let x = 0; x <= width; x += MOUNTAIN_STEP) {
-        const nx = x * 0.004;
+        const nx = x * 0.005;
         const noiseVal = fbm(nx + mountainSeed, mountainSeed, SILHOUETTE_OCTAVES);
-        const islandMask = Math.pow(noiseVal, 2.5); 
         
-        const yOffset = islandMask * maxIslandHeight;
-        const yPos = horizonY - yOffset;
+        const yOffset = noiseVal * maxMountainHeight;
+        const yPos = height - yOffset;
         
         ctx.lineTo(x, yPos);
     }
     
-    for (let x = width; x >= 0; x -= MOUNTAIN_STEP) {
-        const nx = x * 0.004;
-        const noiseVal = fbm(nx + mountainSeed, mountainSeed, SILHOUETTE_OCTAVES);
-        
-        const islandMask = Math.pow(noiseVal, 2.5);
-        const yOffset = islandMask * maxIslandHeight * 0.6;
-        const yPos = horizonY + yOffset;
-        
-        ctx.lineTo(x, yPos);
-    }
-    
+    ctx.lineTo(width, height);
     ctx.closePath();
+    
     ctx.fillStyle = SILHOUETTE_COLOR;
     ctx.fill();
 };
@@ -274,37 +269,30 @@ const initCubistParticles = (width, height, targetArea) => {
 };
 
 const updateAndDrawParticles = (ctx, width, height, pixels, particles) => {
-    // Clear with background color
     ctx.fillStyle = MAIN_BG_COLOR;
     ctx.fillRect(0, 0, width, height);
 
     for (let i = 0; i < particles.length; i++) {
         const p = particles[i];
 
-        // 1. Morph Ratio smoothly towards target ratio (Shape-Shifter)
         p.currentRatioPower = lerp(p.currentRatioPower, p.targetRatioPower, MORPH_SPEED);
         
-        // If close to target, pick a new random target ratio
         if (Math.abs(p.targetRatioPower - p.currentRatioPower) < 0.05) {
             p.targetRatioPower = getRandomFloat(RATIO_EXP_MIN, RATIO_EXP_MAX);
         }
 
-        // 2. Float / Drift position (Floating Mosaic)
         p.x += p.vx;
         p.y += p.vy;
 
-        // Wrap around screen bounds seamlessly
         if (p.x < 0) p.x += width;
         if (p.x >= width) p.x -= width;
         if (p.y < 0) p.y += height;
         if (p.y >= height) p.y -= height;
 
-        // 3. Calculate dimensions based on constant area
         const ratio = Math.pow(BASE_TEN, p.currentRatioPower);
         const rectWidth = Math.sqrt(p.area * ratio);
         const rectHeight = Math.sqrt(p.area / ratio);
 
-        // 4. Sample color dynamically from the hidden offscreen sunset based on current center
         const sampleX = Math.floor(p.x);
         const sampleY = Math.floor(p.y);
         const pixelIndex = (sampleY * width + sampleX) * NUM_CHANNELS;
@@ -313,7 +301,6 @@ const updateAndDrawParticles = (ctx, width, height, pixels, particles) => {
         const g = pixels[pixelIndex + 1];
         const b = pixels[pixelIndex + 2];
 
-        // 5. Draw the rectangle
         const drawX = p.x - (rectWidth * MATH_HALF);
         const drawY = p.y - (rectHeight * MATH_HALF);
 
@@ -332,14 +319,12 @@ const generateAnimatedSunset = () => {
     canvas.width = width;
     canvas.height = height;
 
-    // Generate rich, mirrored landscape off-screen
     const sunsetData = createOffscreenSunset(width, height);
     const pixels = sunsetData.data;
 
     const targetArea = (width * height) * AREA_FRACTION;
     const particles = initCubistParticles(width, height, targetArea);
 
-    // Animation Loop using requestAnimationFrame
     const animate = () => {
         updateAndDrawParticles(ctx, width, height, pixels, particles);
         requestAnimationFrame(animate);
@@ -354,4 +339,55 @@ const generateAnimatedSunset = () => {
 
 window.onload = () => {
     generateAnimatedSunset();
+    // toggleDebugOriginalSunset(true);
+};
+
+
+// ==========================================
+// DEBUGGING FUNCTION (Fullscreen Toggle)
+// ==========================================
+
+const toggleDebugOriginalSunset = (enable) => {
+    const CANVAS_DOM_ID = 'main-canvas';
+    const DEBUG_ELEMENT_ID = 'debug-original-sunset-view';
+    const canvas = document.getElementById(CANVAS_DOM_ID);
+    
+    if (!canvas) {
+        return;
+    }
+
+    let debugCanvas = document.getElementById(DEBUG_ELEMENT_ID);
+
+    if (enable) {
+        if (!debugCanvas) {
+            const width = canvas.width;
+            const height = canvas.height;
+            
+            const sunsetImageData = createOffscreenSunset(width, height);
+            
+            debugCanvas = document.createElement('canvas');
+            debugCanvas.id = DEBUG_ELEMENT_ID;
+            debugCanvas.width = width;
+            debugCanvas.height = height;
+            
+            debugCanvas.style.position = 'fixed';
+            debugCanvas.style.top = '0px';
+            debugCanvas.style.left = '0px';
+            debugCanvas.style.width = '100vw';
+            debugCanvas.style.height = '100vh';
+            debugCanvas.style.zIndex = '99999';
+            debugCanvas.style.display = 'block';
+            
+            const debugCtx = debugCanvas.getContext('2d');
+            debugCtx.putImageData(sunsetImageData, 0, 0);
+            
+            document.body.appendChild(debugCanvas);
+        } else {
+            debugCanvas.style.display = 'block';
+        }
+    } else {
+        if (debugCanvas) {
+            debugCanvas.style.display = 'none';
+        }
+    }
 };
