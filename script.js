@@ -7,6 +7,18 @@
 // System
 const CANVAS_ID = 'main-canvas';
 const CTX_TYPE = '2d';
+const NUM_CHANNELS = 4; // R, G, B, A
+const MATH_HALF = 0.5;
+const BASE_TEN = 10;
+
+// Algorithm Configuration
+const RECTANGLE_COUNT = 18000;     // Increased to densely pack the canvas
+const AREA_FRACTION = 0.01;      // Area of each rect relative to screen size
+const MAIN_BG_COLOR = '#808080';
+
+// Ratio Math (Logarithmic scale for ratios so we get equal amounts of tall vs wide)
+const RATIO_EXP_MIN = -1.6;
+const RATIO_EXP_MAX = 1.6;
 
 // Noise & Mathematics
 const TABLE_SIZE = 256;
@@ -16,14 +28,13 @@ const NOISE_PERSISTENCE = 0.5;
 const NOISE_LACUNARITY = 2.0;
 
 // Cloud Shape / Warping Configuration
-// The X scale is much smaller to stretch the clouds horizontally (wispy look)
 const SCALE_X = 0.0015;
 const SCALE_Y = 0.005;
 const WARP_STRENGTH_X = 2.0;
 const WARP_STRENGTH_Y = 1.0;
-const WARP_OFFSET = 5.2; // Arbitrary offset to prevent mirroring
+const WARP_OFFSET = 5.2;
 
-// Palette (Based on the reference photo: Dark Purples to Fiery Reds/Oranges)
+// Palette
 const PALETTE = [
     { r: 40,  g: 30,  b: 60  }, // Deep Purplish Cloud
     { r: 120, g: 25,  b: 35  }, // Dark Crimson
@@ -40,28 +51,33 @@ const PIXEL_DATA_STEP = 4; // RGBA
 const SILHOUETTE_COLOR = '#080510';
 const SILHOUETTE_HEIGHT_RATIO = 0.08;
 const SILHOUETTE_OCTAVES = 4;
+const MOUNTAIN_STEP = 2;
 
 // ==========================================
-// NOISE GENERATOR (Value Noise)
+// UTILITIES & NOISE GENERATOR
 // ==========================================
 
-// Create a randomized table for the noise generation
+const getRandomFloat = (min, max) => {
+    return Math.random() * (max - min) + min;
+};
+
+const getRandomInt = (min, max) => {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+};
+
 const randomTable = new Float32Array(TABLE_SIZE * 2);
 for (let i = 0; i < TABLE_SIZE * 2; i++) {
     randomTable[i] = Math.random();
 }
 
-// Smoothstep function for smooth interpolation
 const smoothstep = (t) => {
     return t * t * (3 - 2 * t);
 };
 
-// Linear interpolation
 const lerp = (a, b, t) => {
     return a + (b - a) * t;
 };
 
-// Basic 2D Value Noise
 const noise2D = (x, y) => {
     const xi = Math.floor(x);
     const yi = Math.floor(y);
@@ -74,7 +90,6 @@ const noise2D = (x, y) => {
     const ry0 = yi & TABLE_MASK;
     const ry1 = (ry0 + 1) & TABLE_MASK;
     
-    // Hash coordinates to fetch random values from the table
     const c00 = randomTable[rx0 + ry0];
     const c10 = randomTable[rx1 + ry0];
     const c01 = randomTable[rx0 + ry1];
@@ -89,7 +104,6 @@ const noise2D = (x, y) => {
     return lerp(nx0, nx1, sy);
 };
 
-// Fractional Brownian Motion (Stacks noise octaves for detail)
 const fbm = (x, y, octaves) => {
     let total = 0;
     let amplitude = 1.0;
@@ -106,12 +120,7 @@ const fbm = (x, y, octaves) => {
     return total / maxValue;
 };
 
-// ==========================================
-// COLOR MAPPING
-// ==========================================
-
 const getColorForValue = (value) => {
-    // Clamp value between 0.0 and 1.0
     const clamped = Math.max(0, Math.min(1, value));
     
     const maxIndex = PALETTE.length - PALETTE_OFFSET;
@@ -133,14 +142,13 @@ const getColorForValue = (value) => {
 };
 
 // ==========================================
-// DRAWING LOGIC
+// OFFSCREEN SUNSET GENERATION
 // ==========================================
 
 const drawSky = (ctx, width, height) => {
     const imageData = ctx.createImageData(width, height);
     const data = imageData.data;
     
-    // Random offsets so the sky is completely unique every refresh
     const offsetX = Math.random() * 1000;
     const offsetY = Math.random() * 1000;
     
@@ -151,8 +159,6 @@ const drawSky = (ctx, width, height) => {
             const nx = (x + offsetX) * SCALE_X;
             const ny = (y + offsetY) * SCALE_Y;
             
-            // Domain Warping: Distort the coordinates using noise to create 
-            // the stretching, swirling, natural cloud look.
             const warp1 = fbm(nx, ny, NOISE_OCTAVES);
             const warp2 = fbm(nx + WARP_OFFSET, ny + WARP_OFFSET, NOISE_OCTAVES);
             
@@ -161,8 +167,6 @@ const drawSky = (ctx, width, height) => {
             
             const noiseVal = fbm(distortedX, distortedY, NOISE_OCTAVES);
             
-            // Mix the noise with the Y-axis so it gets brighter towards the bottom
-            // We use Math.pow on normalizedY to push the brightness further down
             const elevationFactor = Math.pow(normalizedY, 1.5);
             const finalValue = (noiseVal * 0.6) + (elevationFactor * 0.5);
             
@@ -186,8 +190,7 @@ const drawSilhouette = (ctx, width, height) => {
     ctx.beginPath();
     ctx.moveTo(0, height);
     
-    for (let x = 0; x <= width; x += 2) {
-        // Use a 1D slice of FBM noise for jagged mountain ridges
+    for (let x = 0; x <= width; x += MOUNTAIN_STEP) {
         const nx = x * 0.005;
         const noiseVal = fbm(nx + mountainSeed, mountainSeed, SILHOUETTE_OCTAVES);
         
@@ -204,7 +207,23 @@ const drawSilhouette = (ctx, width, height) => {
     ctx.fill();
 };
 
-const generateRealisticSunset = () => {
+const createOffscreenSunset = (width, height) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext(CTX_TYPE);
+
+    drawSky(ctx, width, height);
+    drawSilhouette(ctx, width, height);
+
+    return ctx.getImageData(0, 0, width, height);
+};
+
+// ==========================================
+// MAIN ALGORITHM
+// ==========================================
+
+const generateAlgorithmicSunset = () => {
     const canvas = document.getElementById(CANVAS_ID);
     const ctx = canvas.getContext(CTX_TYPE);
     
@@ -213,9 +232,42 @@ const generateRealisticSunset = () => {
     
     canvas.width = width;
     canvas.height = height;
-    
-    drawSky(ctx, width, height);
-    drawSilhouette(ctx, width, height);
+
+    // Step 1: Generate old-style sunset in memory
+    const sunsetData = createOffscreenSunset(width, height);
+    const pixels = sunsetData.data;
+
+    // Step 2: Create black canvas
+    ctx.fillStyle = MAIN_BG_COLOR;
+    ctx.fillRect(0, 0, width, height);
+
+    const targetArea = (width * height) * AREA_FRACTION;
+
+    // Step 5: Repeat until N rectangles are drawn
+    for (let i = 0; i < RECTANGLE_COUNT; i++) {
+        // Step 3: Randomly choose a pixel
+        const px = getRandomInt(0, width - 1);
+        const py = getRandomInt(0, height - 1);
+
+        const pixelIndex = (py * width + px) * NUM_CHANNELS;
+        const r = pixels[pixelIndex];
+        const g = pixels[pixelIndex + 1];
+        const b = pixels[pixelIndex + 2];
+        
+        // Step 6: Constant area, very different ratios
+        const ratioPower = getRandomFloat(RATIO_EXP_MIN, RATIO_EXP_MAX);
+        const ratio = Math.pow(BASE_TEN, ratioPower);
+        
+        const rectWidth = Math.sqrt(targetArea * ratio);
+        const rectHeight = Math.sqrt(targetArea / ratio);
+
+        // Step 4: Place rectangle centered on pixel's coordinates
+        const drawX = px - (rectWidth * MATH_HALF);
+        const drawY = py - (rectHeight * MATH_HALF);
+
+        ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
+        ctx.fillRect(drawX, drawY, rectWidth, rectHeight);
+    }
 };
 
 // ==========================================
@@ -223,5 +275,5 @@ const generateRealisticSunset = () => {
 // ==========================================
 
 window.onload = () => {
-    generateRealisticSunset();
+    generateAlgorithmicSunset();
 };
