@@ -4,14 +4,14 @@
 // CONSTANTS & CONFIGURATION
 // ==========================================
 
-// System
+// System & Fixed Layout Resolution
 const CANVAS_ID = 'main-canvas';
 const CTX_TYPE = '2d';
+const VIRTUAL_WIDTH = 2000;
+const VIRTUAL_HEIGHT = 1000;
 const NUM_CHANNELS = 4;
 const MATH_HALF = 0.5;
 const BASE_TEN = 10;
-const CANVAS_BASE_WIDTH = 2000;
-const CANVAS_BASE_HEIGHT = 1000;
 const CSS_FADE_CLASS = 'fade';
 
 // Algorithm Configuration
@@ -26,6 +26,7 @@ const DRIFT_SPEED_MAX = 0.8 * ANIMATION_SPEED_MULTIPLIER;
 const MORPH_SPEED = 0.02 * ANIMATION_SPEED_MULTIPLIER;
 const RATIO_EXP_MIN = -1.6 * ANIMATION_SPEED_MULTIPLIER;
 const RATIO_EXP_MAX = 1.6 * ANIMATION_SPEED_MULTIPLIER;
+const TIME_SCALE = 0.001;
 
 // Noise & Mathematics
 const TABLE_SIZE = 256;
@@ -66,51 +67,94 @@ const MOUNTAIN_STEP = 2;
 // Resize Timing Constants
 const RESIZE_DEBOUNCE_DELAY_MS = 300;
 
-// Global runtime variables for animation control
+// Global runtime variables for synchronization and animation control
 let currentAnimationId = null;
 let isRegenerating = false;
+let serverTimeOffsetMs = 0;
+const GLOBAL_MASTER_SEED = 133799; // Universal constant seed for identical geometry layout everywhere
 
 // ==========================================
-// UTILITIES & NOISE GENERATOR
+// SEEDED PRNG (Mulberry32)
 // ==========================================
 
-const getRandomFloat = (min, max) => {
-    return Math.random() * (max - min) + min;
+const getSeededRandom = (seedValue) => {
+    let t = seedValue += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
 };
 
-const getRandomInt = (min, max) => {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+const getSeededFloat = (seedValue, min, max) => {
+    return getSeededRandom(seedValue) * (max - min) + min;
 };
+
+// ==========================================
+// HIGH-PRECISION TIME SYNCHRONIZATION (time.now API)
+// ==========================================
+
+const fetchHighPrecisionTimeOffset = async () => {
+    const startLocalMs = performance.now();
+    try {
+        const response = await fetch('https://time.now/developer/api/time', { cache: 'no-store' });
+        const data = await response.json();
+        
+        if (data && data.datetime) {
+            const serverTimeMs = new Date(data.datetime).getTime();
+            const endLocalMs = performance.now();
+            const networkLatency = (endLocalMs - startLocalMs) / 2;
+            
+            const currentLocalMs = Date.now();
+            serverTimeOffsetMs = (serverTimeMs + networkLatency) - currentLocalMs;
+            return;
+        }
+    } catch (error) {
+        // Fallback gracefully if API is blocked or offline
+    }
+
+    try {
+        const response = await fetch(window.location.href, { method: 'HEAD', cache: 'no-store' });
+        const dateHeader = response.headers.get('Date');
+        if (dateHeader) {
+            const serverTimeMs = new Date(dateHeader).getTime();
+            serverTimeOffsetMs = serverTimeMs - Date.now();
+        }
+    } catch (error) {
+        serverTimeOffsetMs = 0;
+    }
+};
+
+const getSynchronizedTimeMs = () => {
+    return Date.now() + serverTimeOffsetMs;
+};
+
+// ==========================================
+// UTILITIES & DETERMINISTIC NOISE
+// ==========================================
 
 const lerp = (a, b, t) => {
     return a + (b - a) * t;
 };
 
-const randomTable = new Float32Array(TABLE_SIZE * 2);
-for (let i = 0; i < TABLE_SIZE * 2; i++) {
-    randomTable[i] = Math.random();
-}
-
 const smoothstep = (t) => {
     return t * t * (3 - 2 * t);
 };
 
-const noise2D = (x, y) => {
+const noise2D = (x, y, seed) => {
     const xi = Math.floor(x);
     const yi = Math.floor(y);
     
     const xf = x - xi;
     const yf = y - yi;
     
-    const rx0 = xi & TABLE_MASK;
-    const rx1 = (rx0 + 1) & TABLE_MASK;
-    const ry0 = yi & TABLE_MASK;
-    const ry1 = (ry0 + 1) & TABLE_MASK;
-    
-    const c00 = randomTable[rx0 + ry0];
-    const c10 = randomTable[rx1 + ry0];
-    const c01 = randomTable[rx0 + ry1];
-    const c11 = randomTable[rx1 + ry1];
+    const hash = (px, py) => {
+        let s = Math.imul(px, 374761393) + Math.imul(py, 668265261) + Math.imul(seed, 14469 );
+        return getSeededRandom(s);
+    };
+
+    const c00 = hash(xi, yi);
+    const c10 = hash(xi + 1, yi);
+    const c01 = hash(xi, yi + 1);
+    const c11 = hash(xi + 1, yi + 1);
     
     const sx = smoothstep(xf);
     const sy = smoothstep(yf);
@@ -121,14 +165,14 @@ const noise2D = (x, y) => {
     return lerp(nx0, nx1, sy);
 };
 
-const fbm = (x, y, octaves) => {
+const fbm = (x, y, octaves, seed) => {
     let total = 0;
     let amplitude = 1.0;
     let frequency = 1.0;
     let maxValue = 0;
     
     for (let i = 0; i < octaves; i++) {
-        total += noise2D(x * frequency, y * frequency) * amplitude;
+        total += noise2D(x * frequency, y * frequency, seed + i) * amplitude;
         maxValue += amplitude;
         amplitude *= NOISE_PERSISTENCE;
         frequency *= NOISE_LACUNARITY;
@@ -166,8 +210,8 @@ const drawLandscape = (ctx, width, height) => {
     const imageData = ctx.createImageData(width, height);
     const data = imageData.data;
     
-    const offsetX = Math.random() * 1000;
-    const offsetY = Math.random() * 1000;
+    const offsetX = getSeededFloat(GLOBAL_MASTER_SEED + 1, 0, 1000);
+    const offsetY = getSeededFloat(GLOBAL_MASTER_SEED + 2, 0, 1000);
     
     for (let y = 0; y < height; y++) {
         const normalizedY = y / height;
@@ -176,13 +220,13 @@ const drawLandscape = (ctx, width, height) => {
             const nx = (x + offsetX) * SCALE_X;
             const ny = (y + offsetY) * SCALE_Y;
             
-            const warp1 = fbm(nx, ny, NOISE_OCTAVES);
-            const warp2 = fbm(nx + WARP_OFFSET, ny + WARP_OFFSET, NOISE_OCTAVES);
+            const warp1 = fbm(nx, ny, NOISE_OCTAVES, GLOBAL_MASTER_SEED + 10);
+            const warp2 = fbm(nx + WARP_OFFSET, ny + WARP_OFFSET, NOISE_OCTAVES, GLOBAL_MASTER_SEED + 20);
             
             const distortedX = nx + (warp1 * WARP_STRENGTH_X);
             const distortedY = ny + (warp2 * WARP_STRENGTH_Y);
             
-            const noiseVal = fbm(distortedX, distortedY, NOISE_OCTAVES);
+            const noiseVal = fbm(distortedX, distortedY, NOISE_OCTAVES, GLOBAL_MASTER_SEED + 30);
             
             const finalValue = (noiseVal * 0.4) + (normalizedY * 0.6);
             
@@ -201,14 +245,14 @@ const drawLandscape = (ctx, width, height) => {
 
 const drawHorizonSilhouette = (ctx, width, height) => {
     const maxMountainHeight = height * SILHOUETTE_HEIGHT_RATIO;
-    const mountainSeed = Math.random() * 1000;
+    const mountainSeed = getSeededFloat(GLOBAL_MASTER_SEED + 40, 0, 1000);
     
     ctx.beginPath();
     ctx.moveTo(0, height);
     
     for (let x = 0; x <= width; x += MOUNTAIN_STEP) {
         const nx = x * 0.005;
-        const noiseVal = fbm(nx + mountainSeed, mountainSeed, SILHOUETTE_OCTAVES);
+        const noiseVal = fbm(nx + mountainSeed, mountainSeed, SILHOUETTE_OCTAVES, GLOBAL_MASTER_SEED + 50);
         
         const yOffset = noiseVal * maxMountainHeight;
         const yPos = height - yOffset;
@@ -236,103 +280,118 @@ const createOffscreenSunset = (width, height) => {
 };
 
 // ==========================================
-// ANIMATED CUBIST MOSAIC SYSTEM
+// UNIVERSALLY DETERMINISTIC PARTICLE SYSTEM
 // ==========================================
 
-const initCubistParticles = (width, height, targetArea) => {
+const initCubistParticles = (targetArea) => {
     const particles = [];
 
     for (let i = 0; i < RECTANGLE_COUNT; i++) {
-        const initialPower = getRandomFloat(RATIO_EXP_MIN, RATIO_EXP_MAX);
-        const targetPower = getRandomFloat(RATIO_EXP_MIN, RATIO_EXP_MAX);
-
+        const particleSeed = GLOBAL_MASTER_SEED + i * 7;
+        
         particles.push({
-            x: getRandomInt(0, width - 1),
-            y: getRandomInt(0, height - 1),
-            vx: getRandomFloat(DRIFT_SPEED_MIN, DRIFT_SPEED_MAX) * (Math.random() < 0.5 ? 1 : -1),
-            vy: getRandomFloat(DRIFT_SPEED_MIN, DRIFT_SPEED_MAX) * (Math.random() < 0.5 ? 1 : -1),
-            currentRatioPower: initialPower,
-            targetRatioPower: targetPower,
-            area: targetArea
+            id: i,
+            baseX: getSeededFloat(particleSeed + 1, 0, VIRTUAL_WIDTH),
+            baseY: getSeededFloat(particleSeed + 2, 0, VIRTUAL_HEIGHT),
+            vx: getSeededFloat(particleSeed + 3, DRIFT_SPEED_MIN, DRIFT_SPEED_MAX) * (getSeededRandom(particleSeed + 4) < 0.5 ? 1 : -1),
+            vy: getSeededFloat(particleSeed + 5, DRIFT_SPEED_MIN, DRIFT_SPEED_MAX) * (getSeededRandom(particleSeed + 6) < 0.5 ? 1 : -1),
+            ratioSeed: getSeededFloat(particleSeed + 7, 0, 100),
+            virtualArea: targetArea
         });
     }
 
     return particles;
 };
 
-const updateAndDrawParticles = (ctx, width, height, pixels, particles) => {
+const updateAndDrawParticles = (ctx, screenWidth, screenHeight, localPixels, particles, timeMs) => {
     ctx.fillStyle = MAIN_BG_COLOR;
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(0, 0, screenWidth, screenHeight);
+
+    const t = timeMs * TIME_SCALE;
+
+    const scaleX = screenWidth / VIRTUAL_WIDTH;
+    const scaleY = screenHeight / VIRTUAL_HEIGHT;
 
     for (let i = 0; i < particles.length; i++) {
         const p = particles[i];
 
-        p.currentRatioPower = lerp(p.currentRatioPower, p.targetRatioPower, MORPH_SPEED);
-        
-        if (Math.abs(p.targetRatioPower - p.currentRatioPower) < 0.05) {
-            p.targetRatioPower = getRandomFloat(RATIO_EXP_MIN, RATIO_EXP_MAX);
-        }
+        let vx = (p.baseX + (p.vx * t * 50)) % VIRTUAL_WIDTH;
+        let vy = (p.baseY + (p.vy * t * 50)) % VIRTUAL_HEIGHT;
 
-        p.x += p.vx;
-        p.y += p.vy;
+        if (vx < 0) vx += VIRTUAL_WIDTH;
+        if (vy < 0) vy += VIRTUAL_HEIGHT;
 
-        if (p.x < 0) p.x += width;
-        if (p.x >= width) p.x -= width;
-        if (p.y < 0) p.y += height;
-        if (p.y >= height) p.y -= height;
+        const ratioWave = Math.sin(t * MORPH_SPEED * 10 + p.ratioSeed);
+        const currentRatioPower = lerp(RATIO_EXP_MIN, RATIO_EXP_MAX, (ratioWave + 1) * MATH_HALF);
 
-        const ratio = Math.pow(BASE_TEN, p.currentRatioPower);
-        const rectWidth = Math.sqrt(p.area * ratio);
-        const rectHeight = Math.sqrt(p.area / ratio);
+        const ratio = Math.pow(BASE_TEN, currentRatioPower);
+        const virtualRectWidth = Math.sqrt(p.virtualArea * ratio);
+        const virtualRectHeight = Math.sqrt(p.virtualArea / ratio);
 
-        const sampleX = Math.floor(p.x);
-        const sampleY = Math.floor(p.y);
-        const pixelIndex = (sampleY * width + sampleX) * NUM_CHANNELS;
+        const screenPx = vx * scaleX;
+        const screenPy = vy * scaleY;
+        const screenRectWidth = virtualRectWidth * scaleX;
+        const screenRectHeight = virtualRectHeight * scaleY;
 
-        const r = pixels[pixelIndex];
-        const g = pixels[pixelIndex + 1];
-        const b = pixels[pixelIndex + 2];
+        const sampleX = Math.floor(screenPx);
+        const sampleY = Math.floor(screenPy);
+        const clampedSampleX = Math.max(0, Math.min(screenWidth - 1, sampleX));
+        const clampedSampleY = Math.max(0, Math.min(screenHeight - 1, sampleY));
+        const pixelIndex = (clampedSampleY * screenWidth + clampedSampleX) * NUM_CHANNELS;
 
-        const drawX = p.x - (rectWidth * MATH_HALF);
-        const drawY = p.y - (rectHeight * MATH_HALF);
+        const r = localPixels[pixelIndex];
+        const g = localPixels[pixelIndex + 1];
+        const b = localPixels[pixelIndex + 2];
+
+        const drawX = screenPx - (screenRectWidth * MATH_HALF);
+        const drawY = screenPy - (screenRectHeight * MATH_HALF);
 
         ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
-        ctx.fillRect(drawX, drawY, rectWidth, rectHeight);
+        ctx.fillRect(drawX, drawY, screenRectWidth, screenRectHeight);
     }
 };
 
 // ==========================================
-// RESIZE & SILENT REGENERATION HANDLING
+// RESIZE & SYNCHRONIZED EXECUTION
 // ==========================================
 
-const generateAnimatedSunset = () => {
+const generateAnimatedSunset = async () => {
+    if (isRegenerating) {
+        return;
+    }
+    isRegenerating = true;
+
+    await fetchHighPrecisionTimeOffset();
+
     const canvas = document.getElementById(CANVAS_ID);
     const ctx = canvas.getContext(CTX_TYPE);
     
-    const width = CANVAS_BASE_WIDTH;
-    const height = CANVAS_BASE_HEIGHT;
+    const screenWidth = window.innerWidth;
+    const screenHeight = window.innerHeight;
     
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = screenWidth;
+    canvas.height = screenHeight;
+    canvas.style.width = screenWidth + 'px';
+    canvas.style.height = screenHeight + 'px';
 
-    const sunsetData = createOffscreenSunset(width, height);
-    const pixels = sunsetData.data;
+    const localSunsetData = createOffscreenSunset(screenWidth, screenHeight);
+    const localPixels = localSunsetData.data;
 
-    const targetArea = (width * height) * AREA_FRACTION;
-    const particles = initCubistParticles(width, height, targetArea);
+    const targetArea = (VIRTUAL_WIDTH * VIRTUAL_HEIGHT) * AREA_FRACTION;
+    const particles = initCubistParticles(targetArea);
 
     if (currentAnimationId) {
         cancelAnimationFrame(currentAnimationId);
     }
 
     const animate = () => {
-        if (!isRegenerating) {
-            updateAndDrawParticles(ctx, width, height, pixels, particles);
-        }
+        const syncTimeMs = getSynchronizedTimeMs();
+        updateAndDrawParticles(ctx, screenWidth, screenHeight, localPixels, particles, syncTimeMs);
         currentAnimationId = requestAnimationFrame(animate);
     };
 
     currentAnimationId = requestAnimationFrame(animate);
+    isRegenerating = false;
 };
 
 const setupResizeHandler = () => {
@@ -345,13 +404,7 @@ const setupResizeHandler = () => {
 
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
-            isRegenerating = true;
-
-            // Instantly rebuild canvas silently behind the scenes without fading
             generateAnimatedSunset();
-
-            isRegenerating = false;
-
         }, RESIZE_DEBOUNCE_DELAY_MS);
     });
 };
@@ -360,7 +413,7 @@ const setupResizeHandler = () => {
 // INITIALIZATION
 // ==========================================
 
-window.onload = () => {
+window.onload = async () => {
     const canvas = document.getElementById(CANVAS_ID);
     
     canvas.addEventListener('click', () => {
@@ -369,10 +422,8 @@ window.onload = () => {
         }
     });
     
-    // Build canvas immediately while hidden via its default HTML class (is-faded)
-    generateAnimatedSunset();
+    await generateAnimatedSunset();
     
-    // Smoothly fade in on initial load only
     requestAnimationFrame(() => {
         requestAnimationFrame(() => {
             canvas.classList.remove(CSS_FADE_CLASS);
@@ -399,8 +450,8 @@ const toggleDebugOriginalSunset = (enable) => {
 
     if (enable) {
         if (!debugCanvas) {
-            const width = CANVAS_BASE_WIDTH;
-            const height = CANVAS_BASE_HEIGHT;
+            const width = window.innerWidth;
+            const height = window.innerHeight;
             
             const sunsetImageData = createOffscreenSunset(width, height);
             
